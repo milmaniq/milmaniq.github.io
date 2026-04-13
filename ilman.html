@@ -482,6 +482,476 @@ func (s *Dao) GetUsersByTenantPage(ctx, tenantID, page, pageSize) { ... }
 // Use fx.Shutdowner to gracefully shutdown Fx applications
 </pre>
 
+    <section>
+      <h3>Comparing Slices as Sets — Avoid Sorting</h3>
+
+      <p class="problem">❌ Problem</p>
+      <p>
+        Original implementation sorted both claim slices before comparing them.
+      </p>
+
+      <pre>
+cmClaims := append([]string{}, cm.Claims...)
+otherClaims := append([]string{}, other.Claims...)
+
+sort.Strings(cmClaims)
+sort.Strings(otherClaims)
+  </pre>
+
+      <p>
+        This works, but:
+      </p>
+
+      <ul>
+        <li>Requires sorting (O(n log n))</li>
+        <li>Mutates copied slices unnecessarily</li>
+        <li>Doesn't clearly express the intent that claims are treated as a set</li>
+      </ul>
+
+      <p>
+        PR feedback: If claims are assumed to be unique, use a map instead.
+      </p>
+
+      <p class="fix">✅ Fix — Use a Map (Set Comparison)</p>
+
+      <p>
+        This version:
+      </p>
+
+      <ul>
+        <li>Does not require sorting</li>
+        <li>Works regardless of order</li>
+        <li>Runs in O(n)</li>
+        <li>Clearly expresses “set equality”</li>
+        <li>Matches domain assumption (claims are unique)</li>
+      </ul>
+
+      <pre>
+func (cm *ClaimsMapper) Compare(actual interface{}) error {
+    other, ok := actual.(*ClaimsMapper)
+    if !ok {
+        return fmt.Errorf("expected *ClaimsMapper, got %T", actual)
+    }
+
+    if cm.TokenProfile != other.TokenProfile {
+        return fmt.Errorf(
+            "claims mapper token profile mismatch: expected %s, got %s",
+            cm.TokenProfile, other.TokenProfile,
+        )
+    }
+
+    // Fast-fail if lengths differ
+    if len(cm.Claims) != len(other.Claims) {
+        return fmt.Errorf(
+            "claims mapper claims count mismatch: expected %d, got %d",
+            len(cm.Claims), len(other.Claims),
+        )
+    }
+
+    // Build lookup map (set)
+    expected := make(map[string]struct{}, len(cm.Claims))
+    for _, claim := range cm.Claims {
+        expected[claim] = struct{}{}
+    }
+
+    // Verify each claim exists
+    for _, claim := range other.Claims {
+        if _, ok := expected[claim]; !ok {
+            return fmt.Errorf("claims mapper missing claim: %s", claim)
+        }
+    }
+
+    return nil
+}
+  </pre>
+
+      <p>
+        💡 Insight: When order does not matter and values are unique,
+        think “set comparison”, not “slice comparison”.
+      </p>
+    </section>
+
+
+    <section>
+      <h3>FX Dependency Injection Error — Azure KeyVault in Tests</h3>
+
+      <p class="problem">❌ Problem</p>
+      <p>
+        Application fails to start with a dependency injection error when running integration tests.
+      </p>
+
+      <pre>
+could not build arguments for function "cmd/user-management/application".NewReconciliationService:
+failed to build application.SecretStore:
+failed to build *azure.KeyVault:
+AZURE_KEYVAULT_URL cannot be empty
+  </pre>
+
+      <p>
+        This happens because your Azure module is loaded during tests, but required environment variables
+        (AZURE_KEYVAULT_URL, AZURE_TENANT_ID, AZURE_CLIENT_ID) are not set.
+      </p>
+
+      <p><strong>Root Cause</strong></p>
+      <p>
+        In your DI chain:
+      </p>
+      <pre>
+ReconciliationService → SecretStore → azure.KeyVault
+  </pre>
+      <p>
+        The Azure module (<code>cmd/user-management/adapters/out/azure/fx.go</code>)
+        is being loaded even during integration tests.
+      </p>
+
+      <p class="fix">✅ Fix — Option 1 (Recommended): Disable Azure in Tests</p>
+
+      <pre>
+func newApp(cfg *config.Config, disableAzure bool) *fx.App {
+    modules := []fx.Option{
+        // other modules...
+    }
+
+    if !disableAzure {
+        modules = append(modules, azure.Module)
+    }
+
+    return fx.New(modules...)
+}
+  </pre>
+
+      <p>In tests:</p>
+
+      <pre>
+launcher := test_utils.NewTestAppLauncher(t, func(cfg *config.Config) *fx.App {
+    return newApp(cfg, true) // disable Azure in tests
+}, idpConfig)
+  </pre>
+
+      <p class="fix">✅ Fix — Option 2: Provide a Mock SecretStore</p>
+
+      <p>Create a fake implementation:</p>
+
+      <pre>
+type NoopSecretStore struct{}
+
+func (n *NoopSecretStore) Store(ctx context.Context, path SecretPath, value string) error {
+    return nil
+}
+
+func (n *NoopSecretStore) Fetch(ctx context.Context, path SecretPath) (string, error) {
+    return "", nil
+}
+
+func (n *NoopSecretStore) Delete(ctx context.Context, path SecretPath) error {
+    return nil
+}
+  </pre>
+
+      <p>Bind it in tests using <code>fx.Replace</code>:</p>
+
+      <pre>
+launcher := test_utils.NewTestAppLauncher(
+    t,
+    newApp,
+    idpConfig,
+    test_utils.WithMock(
+        fx.Replace(
+            fx.Annotate(
+                &application.NoopSecretStore{},      // value
+                fx.As(new(application.SecretStore)), // interface it implements
+            ),
+        ),
+    ),
+)
+  </pre>
+
+      <p>
+        ⚠️ Important: <code>fx.Replace</code> only works if the type matches exactly
+        (pointer vs value receiver must align with the original provider).
+      </p>
+    </section>
+
+    <section>
+      <h3>Go Test & Coverage Guide</h3>
+
+      <p>
+        Go provides built-in support for running tests and generating coverage reports.
+      </p>
+
+      <h4>Run a Specific Test with Coverage (Console Output)</h4>
+      <pre>
+go test -v -cover . -run TestIDPServiceWithInternalCurity
+  </pre>
+
+      <h4>Generate Coverage File</h4>
+      <pre>
+go test -v -coverprofile=coverage.out . -run TestIDPServiceWithInternalCurity
+  </pre>
+
+      <h4>View Coverage as HTML</h4>
+      <pre>
+go tool cover -html=coverage.out -o coverage.html
+  </pre>
+
+      <p class="problem">⚠ Important Note (Package Scope)</p>
+      <p>
+        If you run the command from:
+      </p>
+      <pre>
+~/projects/.../cmd/user-management
+  </pre>
+
+      <p>
+        Go will only:
+      </p>
+      <ul>
+        <li>Run tests in the <code>cmd/user-management</code> package</li>
+        <li>Report coverage only for files in that package</li>
+      </ul>
+
+      <p>
+        Code inside <code>internal/</code> or other packages will NOT be included
+        unless those packages are also tested.
+      </p>
+
+      <h4>Run Coverage Across Entire Module</h4>
+      <pre>
+go test -v -covermode=atomic -coverprofile=coverage.out ./... \
+  -run TestIDPServiceWithInternalCurity
+  </pre>
+
+      <ul>
+        <li><code>./...</code> → Runs tests recursively for all packages</li>
+        <li><code>-covermode=atomic</code> → Thread-safe coverage (use if tests run in parallel)</li>
+        <li><code>-coverprofile</code> → Outputs coverage file</li>
+      </ul>
+
+      <h4>Run Full Module with Coverage</h4>
+      <pre>
+go test -covermode=atomic -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out -o coverage.html
+  </pre>
+
+      <h4>Include Specific Packages in Coverage</h4>
+      <pre>
+go test -v -covermode=atomic -coverprofile=coverage.out \
+  -coverpkg=./...,./internal/... \
+  ./... -run TestIDPServiceWithInternalCurity
+  </pre>
+
+      <p>
+        <code>-coverpkg</code> ensures coverage is measured for specified packages,
+        even if tests run from another package.
+      </p>
+
+      <h4>Simplified Version of Complex Coverage Command</h4>
+
+      <p>Original command:</p>
+
+      <pre>
+go test -count=1 -v -timeout 30m -covermode=atomic \
+  -coverprofile=coverage/um_coverage.out \
+  -coverpkg=$(go list ./cmd/user-management/... | \
+    grep -vE "generated|test" | tr '\n' ',' | sed 's/,$//') \
+  "./cmd/user-management/..."
+  </pre>
+
+      <p><strong>What it does:</strong></p>
+      <ul>
+        <li><code>-count=1</code> → Disables test caching</li>
+        <li><code>-timeout 30m</code> → Allows long-running tests</li>
+        <li>Dynamically selects packages excluding generated/test files</li>
+      </ul>
+
+      <p><strong>Cleaner Alternative (Explicit Packages):</strong></p>
+
+      <pre>
+go test -v -covermode=atomic -coverprofile=coverage.out \
+  ./cmd/user-management \
+  ./cmd/user-management/application \
+  ./cmd/user-management/domain
+  </pre>
+
+      <h4>Key Points</h4>
+      <ul>
+        <li>Coverage is per package.</li>
+        <li>To include other folders, use <code>./...</code> or specify packages explicitly.</li>
+        <li>If a package has no tests, coverage will not appear for it.</li>
+        <li>You can create integration tests that import other packages to increase coverage.</li>
+      </ul>
+
+      <p>
+        💡 Tip: Use <code>atomic</code> mode if using <code>t.Parallel()</code>. Otherwise,
+        <code>set</code> mode is slightly faster.
+      </p>
+    </section>
+
+    <section>
+      <h3>MongoDB NoSuchTransaction Error in processReconciliation</h3>
+
+      <p class="problem">❌ Error</p>
+      <pre>
+failed to save aggregate: (NoSuchTransaction) Transaction with { txnNumber: 1 } has been aborted.
+  </pre>
+
+      <p class="root-cause">🔎 Root Cause</p>
+      <p>
+        The <code>NoSuchTransaction</code> error occurs because MongoDB transactions have a default timeout of 60
+        seconds.
+        Your original code was running everything inside a single <code>rs.ts.Run()</code> transaction while making
+        multiple
+        external HTTP calls to Curity. These HTTP calls can take significant time, and when the cumulative time exceeds
+        the
+        transaction timeout, MongoDB aborts the transaction.
+      </p>
+
+      <p class="fix">✅ Fix</p>
+      <p>
+        Restructure the code to use short-lived transactions that only perform database operations, while external HTTP
+        calls
+        happen outside the transactions:
+      </p>
+
+      <ul>
+        <li><strong>Phase 1:</strong> Load tenant and get reconciliation data in a short transaction, then save
+          immediately.</li>
+        <li><strong>Phase 2:</strong> For each IDP, make the external HTTP call outside the transaction, then update
+          status in a separate short transaction.</li>
+        <li><strong>Phase 3:</strong> Reset database clients – external calls outside transaction, then save in a short
+          transaction.</li>
+        <li><strong>Phase 4:</strong> For each application client, external call outside transaction, then update status
+          in a short transaction.</li>
+      </ul>
+
+      <p>
+        <strong>Summary:</strong> External HTTP calls must happen <strong>outside</strong> the transaction to avoid
+        MongoDB timeouts.
+      </p>
+
+      <h4>Additional Notes: Optimistic Locking & Reloading Tenant</h4>
+      <p>
+        Load the tenant once at the beginning and reuse it for all external HTTP calls. Reload the tenant only when
+        saving, because:
+      </p>
+
+      <ul>
+        <li>The aggregate pattern uses <strong>optimistic locking</strong> (version checks).</li>
+        <li>We need the latest version to save successfully.</li>
+        <li>Saving a stale tenant object would cause a version conflict.</li>
+      </ul>
+
+      <p><strong>Example of reload on save:</strong></p>
+      <pre>
+err = rs.ts.Run(ctx, func(ctx context.Context, repo core.Repository) error {
+    t := &domain.Tenant{}
+    if loadErr := repo.Load(ctx, tenantId, t); loadErr != nil {  // Get latest version
+        return loadErr
+    }
+    // ... modify t ...
+    return repo.Save(ctx, t)  // Save with correct version
+})
+  </pre>
+
+      <p>
+        External HTTP calls (to Curity) only need to <strong>read</strong> tenant data – they don't care about the
+        version.
+        Database <strong>save</strong> operations must reload the tenant to ensure the correct version for optimistic
+        locking.
+      </p>
+    </section>
+
+
+    <section>
+      <h3>Tell, Don’t Ask Principle (DDD / OOP)</h3>
+
+      <p>
+        <strong>Tell, Don’t Ask</strong> is an object-oriented design principle that says:
+      </p>
+
+      <p>
+        Instead of asking an object for its internal state and making decisions outside it…
+        <strong>Tell the object what to do and let it decide internally.</strong>
+      </p>
+
+      <p class="problem">❌ What You’re Doing (Asking)</p>
+
+      <p>
+        The service pulls data out of the aggregate and makes business decisions externally:
+      </p>
+
+      <pre>
+if !scimSourceState.AllowProvisioning {
+    return fmt.Errorf("...")
+}
+
+expTime := scimSourceState.Expiry.Time
+currentTime := s.clock.NowUTC().Time
+
+if expTime.IsZero() || expTime.Before(currentTime) {
+    return fmt.Errorf("...")
+}
+  </pre>
+
+      <p>
+        Why this violates <em>Tell, Don’t Ask</em>:
+      </p>
+
+      <ul>
+        <li>You ask the aggregate for its internal data.</li>
+        <li>You implement business rules in the service layer.</li>
+        <li>Business logic becomes scattered.</li>
+        <li>Aggregate invariants are not enforced by the aggregate itself.</li>
+      </ul>
+
+      <p class="fix">✅ Correct Approach (Tell)</p>
+
+      <p>
+        Move business rules into the aggregate and expose behavior instead of fields.
+      </p>
+
+      <p><strong>Inside the Aggregate:</strong></p>
+
+      <pre>
+func (s State) CanProvision(now core.Timestamp) error {
+    if !s.AllowProvisioning {
+        return errors.New("provisioning disabled")
+    }
+
+    if s.Expiry.IsZero() || s.Expiry.Before(now) {
+        return fmt.Errorf("SCIM source expired on %s", s.Expiry)
+    }
+
+    return nil
+}
+  </pre>
+
+      <p><strong>Inside the Service (Tell the Aggregate):</strong></p>
+
+      <pre>
+if err := scimSourceState.CanProvision(s.clock.NowUTC()); err != nil {
+    return fmt.Errorf("[%s] %w", logPrefix, err)
+}
+  </pre>
+
+      <p>
+        Now:
+      </p>
+
+      <ul>
+        <li>The service tells the aggregate: <em>“Check if provisioning is allowed.”</em></li>
+        <li>The aggregate enforces its own invariants.</li>
+        <li>Business rules remain inside the domain.</li>
+        <li>The code becomes cleaner and more maintainable.</li>
+      </ul>
+
+      <p>
+        💡 Key Insight: Aggregates should protect their invariants.
+        Services orchestrate — they should not enforce domain rules.
+      </p>
+    </section>
+
+
     <!-- Begin appended content -->
     <section>
       <h3>Git Commits</h3>
@@ -507,6 +977,55 @@ func (s *Dao) GetUsersByTenantPage(ctx, tenantID, page, pageSize) { ... }
         <li>revert – For reverting a previous commit</li>
       </ul>
     </section>
+
+    <section>
+      <h3>How to Merge Two Branches (Example: main → release)</h3>
+
+      <p>
+        To merge changes from <code>main</code> into your current branch
+        (e.g., <code>release/1.14.0</code>):
+      </p>
+
+      <pre>
+git pull origin main
+  </pre>
+
+      <p>
+        This fetches the latest changes from <code>origin/main</code> and merges them
+        into your current branch.
+      </p>
+
+      <p class="problem">📝 If GNU Nano Opens (Commit Message Required)</p>
+
+      <p>
+        If your repository uses a <strong>conventional commit hook</strong>,
+        you must provide a valid commit message.
+      </p>
+
+      <p><strong>Example message:</strong></p>
+
+      <pre>
+chore(release): merge main into release/1.14.0
+  </pre>
+
+      <p><strong>In GNU Nano 7.2:</strong></p>
+
+      <ul>
+        <li><strong>CTRL + O</strong> → Write Out (Save)</li>
+        <li><strong>ENTER</strong> → Confirm filename</li>
+        <li><strong>CTRL + X</strong> → Exit</li>
+      </ul>
+
+      <p class="fix">✅ Result</p>
+      <p>
+        Your release branch now contains the latest changes from <code>main</code>.
+      </p>
+
+      <p>
+        💡 Tip: Always make sure you are on the correct target branch before running the merge.
+      </p>
+    </section>
+
 
     <section>
       <h3>Idempotent Operations</h3>
@@ -542,6 +1061,113 @@ func (s *Dao) GetUsersByTenantPage(ctx, tenantID, page, pageSize) { ... }
     </section>
 
     <section>
+      <h3>Logging into MongoDB with Replica Set (Kubernetes)</h3>
+
+      <p>
+        When MongoDB is deployed as a replica set inside Kubernetes, you must connect using
+        the replica set connection string (not just a single pod).
+      </p>
+
+      <p class="problem">📌 Steps</p>
+
+      <p><strong>1️⃣ Exec into one of the MongoDB pods</strong></p>
+      <pre>
+kubectl exec -it mongo-0 -n user-management-db -- bash
+  </pre>
+
+      <p>
+        This opens a shell inside the <code>mongo-0</code> pod in the
+        <code>user-management-db</code> namespace.
+      </p>
+
+      <p><strong>2️⃣ Connect using mongosh with replica set</strong></p>
+      <pre>
+mongosh "mongodb://mongo-0.mongo-service.user-management-db.svc.cluster.local:27017,\
+mongo-1.mongo-service.user-management-db.svc.cluster.local:27017/user_management?replicaSet=rs0"
+  </pre>
+
+      <p>
+        Key parts of the connection string:
+      </p>
+
+      <ul>
+        <li><strong>Multiple hosts</strong> → Required for replica set awareness.</li>
+        <li><strong>Database name</strong> → <code>user_management</code></li>
+        <li><strong>replicaSet=rs0</strong> → Must match your configured replica set name.</li>
+      </ul>
+
+      <p class="fix">✅ Result</p>
+      <p>
+        You are connected to the primary node of the replica set (e.g., <code>rs0 [primary]</code>),
+        and MongoDB will automatically handle failover if the primary changes.
+      </p>
+
+      <p>
+        💡 Tip: Always include the <code>replicaSet</code> parameter when connecting to a replica set,
+        otherwise you may connect in standalone mode and miss replica set behavior.
+      </p>
+    </section>
+
+    <section>
+      <h3>Encryption at Rest in MongoDB Atlas</h3>
+
+      <h4>Is Data Encrypted at Rest?</h4>
+
+      <p>
+        <strong>YES — always, by default.</strong>
+      </p>
+
+      <p>
+        MongoDB Atlas automatically encrypts:
+      </p>
+
+      <ul>
+        <li>Database files</li>
+        <li>Indexes</li>
+        <li>Backups</li>
+        <li>Snapshots</li>
+      </ul>
+
+      <p>
+        Encryption uses <strong>AES-256</strong>, and it cannot be disabled in Atlas.
+      </p>
+
+      <h4>Why Don’t You See Encrypted Data?</h4>
+
+      <p>
+        Because encryption at rest happens at the <strong>storage layer</strong>,
+        not at the query layer.
+      </p>
+
+      <h4>How It Works Internally</h4>
+
+      <pre>
+Application
+   ↓ (plain BSON)
+MongoDB Engine
+   ↓
+Encrypted on disk (AES-256)
+  </pre>
+
+      <p>
+        Flow explanation:
+      </p>
+
+      <ul>
+        <li>MongoDB decrypts data in memory.</li>
+        <li>Serves it to authenticated users.</li>
+        <li>Encrypts it again before writing back to disk.</li>
+      </ul>
+
+      <p>
+        💡 Key Insight: Encryption at rest protects data if storage disks or backups
+        are compromised — but authenticated database queries still return readable data.
+      </p>
+    </section>
+
+
+
+    <section>
       <h3>Docker & Kubernetes Deployment</h3>
       <pre>
 docker build -t user-management-svc:latest .
@@ -549,6 +1175,205 @@ k3d image import user-management-svc:latest -c user-management-local
 kubectl rollout restart deployment/user-management-svc -n user-management-app
         </pre>
     </section>
+
+    <section>
+      <h3>Copying Files to MongoDB Pod & Loading Script</h3>
+
+      <p>
+        Sometimes you need to manually initialize or update a MongoDB database inside a Kubernetes cluster.
+        This can be done by copying a JavaScript file into the MongoDB pod and executing it using <code>mongosh</code>.
+      </p>
+
+      <p class="problem">📌 Steps</p>
+
+      <p><strong>1️⃣ Copy the script into the MongoDB pod</strong></p>
+      <pre>
+kubectl cp mongo-create_database.js \
+  user-management-db/mongo-0:/tmp/mongo-create_database.js
+  </pre>
+
+      <p>
+        This copies the local file <code>mongo-create_database.js</code> into the pod
+        <code>mongo-0</code> inside namespace <code>user-management-db</code>.
+      </p>
+
+      <p><strong>2️⃣ Exec into the MongoDB pod</strong></p>
+      <pre>
+kubectl exec -it mongo-0 -n user-management-db -- bash
+  </pre>
+
+      <p><strong>3️⃣ Connect to MongoDB replica set</strong></p>
+      <pre>
+mongosh "mongodb://mongo-0.mongo-service.user-management-db.svc.cluster.local:27017,\
+mongo-1.mongo-service.user-management-db.svc.cluster.local:27017/user_management?replicaSet=rs0"
+  </pre>
+
+      <p>
+        This connects to the MongoDB replica set <code>rs0</code> and selects the
+        <code>user_management</code> database.
+      </p>
+
+      <p><strong>4️⃣ Load the script</strong></p>
+      <pre>
+load('/tmp/mongo-create_database.js')
+  </pre>
+
+      <p>
+        The script will execute inside the connected MongoDB shell context.
+      </p>
+
+      <p class="fix">✅ Result</p>
+      <p>
+        Your database objects (collections, indexes, seed data, etc.) defined in the script
+        are created inside the replica set.
+      </p>
+
+      <p>
+        💡 Tip: This approach is useful for quick manual setup, but for production environments,
+        consider automating initialization using init containers, Helm hooks, or migration tools.
+      </p>
+    </section>
+
+    <section>
+      <h3>Kubernetes ServiceAccount Tokens</h3>
+
+      <p class="problem">❌ Task / Problem</p>
+      <p>You need to generate tokens for Kubernetes ServiceAccounts to authenticate to services or APIs.</p>
+
+      <p class="example">View existing ServiceAccounts in a namespace:</p>
+      <pre>
+ilman@IFSCLIENT-01046:~$ kubectl get serviceaccounts -n user-management
+NAME                 SECRETS   AGE
+auth-sync-agent      0         5d14h
+authz-cdc-sync       0         4d19h
+default              0         5d21h
+end-user-svc         0         5d14h
+user-management-ui   0         5d14h
+  </pre>
+
+      <p class="fix">✅ Generate a token for a ServiceAccount</p>
+      <pre>
+ilman@IFSCLIENT-01046:~$ kubectl create token end-user-svc --namespace user-management -o yaml
+apiVersion: authentication.k8s.io/v1
+kind: TokenRequest
+metadata:
+  name: end-user-svc
+  namespace: user-management
+spec:
+  audiences:
+  - https://your-api-endpoint/
+  expirationSeconds: 3600
+status:
+  expirationTimestamp: "..."
+  token: eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...
+  </pre>
+
+      <p>
+        The <strong>sub claim</strong> in the token is derived from the ServiceAccount identity itself, formatted as:
+      </p>
+      <pre>system:serviceaccount:&lt;namespace&gt;:&lt;serviceaccount-name&gt;</pre>
+
+      <p class="example">Generate a token for another ServiceAccount with a specific audience and duration:</p>
+      <pre>
+ilman@IFSCLIENT-01046:~$ kubectl create token user-management-back \
+  --namespace user-management \
+  --audience=k8s \
+  --duration=24h -o yaml
+  </pre>
+
+      <p class="tip">
+        These tokens can be used by applications or services to authenticate to Kubernetes APIs or other services that
+        trust the ServiceAccount.
+      </p>
+    </section>
+
+
+    <section>
+      <h3>Passing a Values File to a Helm Chart & Using <code>less</code></h3>
+
+      <h4>Authenticate to Azure Container Registry (ACR)</h4>
+
+      <pre>
+az acr login --name nxsdvlglb01acr
+  </pre>
+
+      <p>
+        This logs your Docker/Helm client into the Azure Container Registry
+        so you can pull OCI-based Helm charts.
+      </p>
+
+      <h4>Render a Helm Chart with a Custom Values File</h4>
+
+      <pre>
+helm template oci://nxsdvlglb01acr.azurecr.io/ifs-pd/ifs-technology-security-nexus-auth/chart/nexus-auth \
+  --version 0.1.0+69f989d97a0a26d6ba2ca8dd3ecd2ed9c1d5b1bd \
+  --values /mnt/c/dev/projects/ifs-technology-security-nexus-auth/charts/tmp/auth-gateway.values.yaml
+  </pre>
+
+      <p>
+        <strong>What this does:</strong>
+      </p>
+
+      <ul>
+        <li><code>helm template</code> → Renders Kubernetes YAML locally (does NOT install).</li>
+        <li><code>oci://...</code> → Pulls the chart from ACR (OCI registry).</li>
+        <li><code>--version</code> → Specifies the exact chart version.</li>
+        <li><code>--values</code> → Overrides default values using your YAML file.</li>
+      </ul>
+
+      <p>
+        This is useful for previewing generated Kubernetes manifests before deploying.
+      </p>
+
+      <h4>Using <code>--set</code> for Quick Overrides</h4>
+
+      <pre>
+helm template test-cdc charts/nexus-auth \
+  --set user-management.enabled=true
+  </pre>
+
+      <p>
+        <code>--set</code> allows inline overrides instead of using a values file.
+      </p>
+
+      <h4>What is <code>less</code>?</h4>
+
+      <p>
+        <code>less</code> is a Linux pager tool used to view long command output one screen at a time.
+      </p>
+
+      <p>
+        Example:
+      </p>
+
+      <pre>
+helm template test-cdc charts/nexus-auth \
+  --set user-management.enabled=true | less
+  </pre>
+
+      <p>
+        The pipe (<code>|</code>) sends the Helm output into <code>less</code>,
+        allowing you to scroll through the generated YAML.
+      </p>
+
+      <h4>How to Use <code>less</code></h4>
+
+      <ul>
+        <li><strong>Arrow keys</strong> → Scroll up/down</li>
+        <li><strong>Space</strong> → Next page</li>
+        <li><strong>b</strong> → Previous page</li>
+        <li><strong>/keyword</strong> → Search forward</li>
+        <li><strong>n</strong> → Next search result</li>
+        <li><strong>q</strong> → Quit</li>
+      </ul>
+
+      <p>
+        💡 Tip: Using <code>helm template ... | less</code> is very useful for inspecting
+        large rendered manifests before applying them to the cluster.
+      </p>
+    </section>
+
+
 
     <section>
       <h3>Managed Identity (Azure)</h3>
@@ -1092,6 +1917,108 @@ kubectl get svc -n &lt;ingress-namespace&gt;</code></pre>
         </li>
       </ul>
     </section>
+
+    <section>
+      <h3>SSO in Curity</h3>
+
+      <p>
+        An <strong>SSO session (authenticated session)</strong> is created on the Identity Server
+        after a successful authentication.
+      </p>
+
+      <p>It contains information such as:</p>
+      <ul>
+        <li>How the user authenticated (which authenticator)</li>
+        <li>When the user authenticated</li>
+        <li>Details about the authenticated user</li>
+      </ul>
+
+      <p>
+        When a new authentication request arrives, Curity checks whether an existing SSO session
+        satisfies the requirements of that request.
+      </p>
+
+      <p>The Identity Server may verify:</p>
+      <ul>
+        <li>Is there an SSO session for the requested authenticator?</li>
+        <li>Is the session still valid (not expired or violating <code>max_age</code>)?</li>
+        <li>Did the client allow SSO to be used?</li>
+      </ul>
+
+      <p>
+        Only Curity can read the SSO session. It uses this session to construct the token returned
+        to the client as proof of authentication.
+        In OpenID Connect, that proof is the <strong>ID Token</strong>.
+      </p>
+
+      <h4>How SSO Works in Your Setup</h4>
+
+      <p>
+        You have multiple applications in the same cluster:
+      </p>
+      <ul>
+        <li><strong>User Management</strong> → uses <code>user-management-client</code></li>
+        <li><strong>Portals</strong> → uses <code>portals-client</code></li>
+      </ul>
+
+      <p>
+        Both clients use the same <strong>end-user authenticator</strong>, which delegates authentication
+        to Entra ID (Azure AD) using OIDC.
+      </p>
+
+      <p>
+        <strong>Important:</strong> SSO happens at the Identity Provider (Curity), not in your applications.
+      </p>
+
+      <p>
+        If Curity already authenticated the user, and another app redirects the user to Curity:
+      </p>
+      <ul>
+        <li>Curity detects an existing login session (via session cookie).</li>
+        <li>Curity immediately issues tokens.</li>
+        <li>No login screen is shown again.</li>
+      </ul>
+
+      <h4>Requirements for SSO to Work</h4>
+
+      <ul>
+        <li>✔ Both clients use the same authenticator.</li>
+        <li>✔ They belong to the same Curity session domain.</li>
+        <li>✔ SSO is enabled in <code>System → Sessions</code>.</li>
+        <li>✔ Clients do NOT force re-authentication:
+          <ul>
+            <li>Do NOT send <code>prompt=login</code></li>
+            <li>Do NOT set <code>max_age</code> greater than 0</li>
+          </ul>
+        </li>
+      </ul>
+
+      <h4>SSO Flow Example</h4>
+
+      <p><strong>User logs into App A (User Management):</strong></p>
+      <ul>
+        <li>User Management redirects to Curity.</li>
+        <li>Curity redirects to Entra ID.</li>
+        <li>User signs in.</li>
+        <li>Curity creates an SSO session cookie under the Curity domain.</li>
+        <li>Tokens are issued to User Management.</li>
+      </ul>
+
+      <p><strong>User then opens App B (Portals):</strong></p>
+      <ul>
+        <li>Portals redirects to Curity for authentication.</li>
+        <li>The browser automatically sends the existing Curity session cookie.</li>
+        <li>Curity detects the active SSO session.</li>
+        <li>Curity immediately issues tokens (no Entra login).</li>
+        <li>User is logged in via SSO.</li>
+      </ul>
+
+      <p>
+        💡 Key Insight: The browser stores the session cookie for the Curity domain.
+        Any application that redirects the user to that same Curity domain can benefit from SSO.
+      </p>
+    </section>
+
 
     <section>
       <h3>RBAC – Role-Based Access Control</h3>

@@ -87,7 +87,7 @@
       Learn how to deploy a complete application stack on Kubernetes, from Pods, Deployments, and Services to
       Config Maps and Secrets.
       Discover how to expose apps externally via Ingress, manage traffic with port forwarding and external IPs, and
-      securely handle configurations with ConfigMaps and Secrets—all in a practical, hands-on way.
+      securely handle configurations with ConfigMaps and Secrets&mdash;all in a practical, hands-on way.
     </p>
 
     <img id="half-width" src="img/k8s-1.png" alt="mysql-to-snowflake-data-migration-airbyte" />
@@ -126,22 +126,22 @@
       </tr>
     </table>
 
-    <h3>Using kubectl — the essential commands</h3>
+    <h3>Using kubectl &mdash; the essential commands</h3>
     <p>kubectl is your remote control for Kubernetes. Use it to inspect, modify, and debug the cluster.</p>
 
-    <h4>kubectl get — list resources</h4>
+    <h4>kubectl get &mdash; list resources</h4>
     <pre><code>kubectl get pods
 kubectl get deployments
 kubectl get services
 kubectl get namespaces</code></pre>
 
-    <h4>kubectl describe — show detailed information about a resource</h4>
+    <h4>kubectl describe &mdash; show detailed information about a resource</h4>
     <pre><code>kubectl describe pod my-pod</code></pre>
 
-    <h4>kubectl logs — print the logs from a container in a pod</h4>
+    <h4>kubectl logs &mdash; print the logs from a container in a pod</h4>
     <pre><code>kubectl logs my-pod</code></pre>
 
-    <h4>kubectl exec — execute a command on a container in a pod (interactive)</h4>
+    <h4>kubectl exec &mdash; execute a command on a container in a pod (interactive)</h4>
     <pre><code>kubectl exec -it my-pod -- /bin/sh</code></pre>
 
     <div class="tip">
@@ -195,14 +195,14 @@ kube-system       Active   14m</code></pre>
     <h3>Local clusters: Minikube, MicroK8s, K3s / k3d</h3>
     <p>For learning and local development you can run Kubernetes in several ways:</p>
     <ul>
-      <li>Minikube — single-node cluster in a VM or Docker.</li>
-      <li>MicroK8s — lightweight single-node K8s from Canonical. Uses microk8s kubectl.</li>
-      <li>K3s — lightweight Kubernetes distribution, often used by k3d.</li>
-      <li>k3d — runs K3s inside Docker containers (great for CI and local multi-cluster testing).</li>
+      <li>Minikube &mdash; single-node cluster in a VM or Docker.</li>
+      <li>MicroK8s &mdash; lightweight single-node K8s from Canonical. Uses microk8s kubectl.</li>
+      <li>K3s &mdash; lightweight Kubernetes distribution, often used by k3d.</li>
+      <li>k3d &mdash; runs K3s inside Docker containers (great for CI and local multi-cluster testing).</li>
     </ul>
 
     <div class="note">
-      MicroK8s note: MicroK8s bundles its own <code>kubectl</code>. To be sure you’re talking to the MicroK8s cluster,
+      MicroK8s note: MicroK8s bundles its own <code>kubectl</code>. To be sure you're talking to the MicroK8s cluster,
       prepend
       <code>microk8s</code> (for example: <code>microk8s kubectl get namespaces</code>). This avoids accidentally using
       a different kubeconfig/context on your machine.
@@ -232,7 +232,7 @@ kube-system       Active   14m</code></pre>
       <code>K3s</code> and <code>containerd</code> this often means a lightweight k3s/k3d cluster running on WSL2 or
       Docker.
     </div>
-    <h3>Deployments &amp; Services — basics and YAML tips</h3>
+    <h3>Deployments &amp; Services &mdash; basics and YAML tips</h3>
     <p>
       Important: In YAML you can put multiple resource objects in one file separated by three dashes ---.
       Example: a Deployment and a Service in a single manifest. You can also create separate files
@@ -245,7 +245,7 @@ kube-system       Active   14m</code></pre>
       scalable, and easy to update. Key benefits include:
     </p>
     <ul>
-      <li><strong>Ephemeral Pods:</strong> If a Pod dies, it’s gone. A Deployment automatically recreates Pods to
+      <li><strong>Ephemeral Pods:</strong> If a Pod dies, it's gone. A Deployment automatically recreates Pods to
         maintain the desired state (self-healing).</li>
       <li><strong>Scaling:</strong> You can declaratively set <code>replicas</code> and Kubernetes will spin up that
         many Pods and balance traffic across them via the Service.</li>
@@ -260,7 +260,7 @@ kube-system       Active   14m</code></pre>
     </ul>
     <p>
       In short: a Deployment gives you <em>self-healing</em>, <em>scaling</em>, <em>rolling updates</em>, and
-      <em>rollbacks</em> — making it the standard for running apps in Kubernetes.
+      <em>rollbacks</em> &mdash; making it the standard for running apps in Kubernetes.
     </p>
 
 
@@ -280,7 +280,7 @@ spec:
       labels:
         app: user-management-app          # This label is added to every Pod created by the Deployment.
                                           # It MUST match the selector above, otherwise the Deployment
-                                          # won’t recognize its own Pods.
+                                          # won't recognize its own Pods.
     spec:
       containers:
       - name: user-management-app         # Container name inside each Pod
@@ -293,7 +293,6 @@ spec:
         - name: EXTERNAL_BACKEND_URL
           value: "http://external-backend-svc:8088"
           # Pod will call this Service instead of raw Windows IP
-
 </code></pre>
 
     <h4>Why create a Service?</h4>
@@ -363,85 +362,164 @@ kubectl rollout status deployment user-management-app -n user-management-app
     <ul>
       <li><strong>ClusterIP (default):</strong> Exposes the Service on an internal IP in the cluster.
         This makes the Service reachable only from within the cluster.
-        <br />👉 Used for: Internal microservice-to-microservice communication.
+        <br>Used for: Internal microservice-to-microservice communication.
       </li>
-      <li><strong>NodePort:</strong> Exposes the Service on each Node’s IP at a static port (between 30000–32767).
-        <br />👉 Used for: Simple external access to a Service, mainly for dev/test environments.
+      <li><strong>NodePort:</strong> Exposes the Service on each Node's IP at a static port (between 30000&ndash;32767).
+        <br>Used for: Simple external access to a Service, mainly for dev/test environments.
       </li>
-      <li><strong>LoadBalancer:</strong> Exposes the Service externally using a cloud provider’s load balancer.
-        <br />👉 Used for: Production environments in cloud (AWS ELB, GCP LB, Azure LB).
+      <li><strong>LoadBalancer:</strong> Exposes the Service externally using a cloud provider's load balancer.
+        <br>Used for: Production environments in cloud (AWS ELB, GCP LB, Azure LB).
       </li>
       <li><strong>ExternalName:</strong> Maps a Service to an external DNS name (e.g., a legacy system or DB).
-        <br />👉 Used for: Accessing external services as if they were inside the cluster.
+        <br>Used for: Accessing external services as if they were inside the cluster.
       </li>
     </ul>
-    <h3>Working with NodePorts</h3>
-    <p>Create a Service that exposes the Deployment named <code>user-management-app</code>:</p>
-    <pre><code>kubectl expose deployment/user-management-app --type="NodePort" --port 8082 --name=user-management-svc-nodeport -n user-management-app
-</code></pre>
+
+    <h3>Understanding ClusterIP</h3>
+    <p>
+      When you create a Service, Kubernetes automatically assigns it a <strong>ClusterIP</strong> &mdash; a virtual
+      IP address that exists only inside the cluster. You don't define this IP in your Service manifest; Kubernetes
+      picks one for you.
+    </p>
+    <p>
+      Any Pod inside the same cluster can reach your Service using its DNS name. For example, if you have a
+      Service called <code>my-service</code> in the namespace <code>my-namespace</code>, other Pods can call:
+    </p>
+    <pre><code>my-service.my-namespace.svc.cluster.local</code></pre>
+    <p>
+      The traffic flow looks like this:
+    </p>
+    <pre><code>Pod (caller) &rarr; DNS resolves to ClusterIP &rarr; kube-proxy &rarr; target Pod</code></pre>
+    <p>
+      The ClusterIP acts as a stable entry point. Even if the Pods behind the Service are replaced or
+      rescheduled, the ClusterIP stays the same and kube-proxy routes traffic to whichever Pods are
+      currently healthy.
+    </p>
+
+    <h3>Understanding NodePort</h3>
+    <p>
+      A NodePort Service exposes your application on every Node's IP at a fixed port:
+    </p>
+    <pre><code>&lt;Node IP&gt;:&lt;NodePort&gt;</code></pre>
+    <p>
+      But what exactly is a "Node"? That depends on your cluster.
+    </p>
+
+    <h4>Nodes in k3d (local development)</h4>
+    <p>
+      In a k3d cluster, a Node is a <strong>Docker container acting as a machine</strong>. This is the
+      Docker container where Kubernetes (k3s) runs. You can prove this by running <code>docker ps</code>
+      &mdash; you'll see something like <code>k3d-user-management-local-server-0</code>.
+    </p>
+    <pre><code>Your Laptop (WSL)
+   &darr;
+Docker
+   &darr;
+[ k3d node container ]   &larr; acts like a VM (this is your "node")
+   &darr;
+Kubernetes (k3s)
+   &darr;
+Pods
+   &darr;
+Containers (your apps)</code></pre>
+
+    <h4>Nodes in AKS (production)</h4>
+    <p>
+      In an AKS cluster, a Node is a <strong>real Azure VM</strong>. When you apply a Deployment manifest,
+      Kubernetes creates multiple Pods via a ReplicaSet, and each Pod is independently scheduled onto
+      available Nodes based on resource availability. Kubernetes spreads Pods across Nodes so that if
+      one Node dies, the remaining Nodes keep the system running.
+    </p>
+
+    <h4>How NodePort Access Differs by Environment</h4>
+    <p>
+      <strong>In AKS</strong>, if you create a NodePort Service like this:
+    </p>
+    <pre><code>type: NodePort
+ports:
+  - port: 80
+    nodePort: 30007</code></pre>
+    <p>
+      You can access the service directly at <code>&lt;Node-VM-IP&gt;:30007</code> from anywhere that
+      can reach the VM's network.
+    </p>
 
     <p>
-      This command creates a Service of type <code>NodePort</code> to expose the <code>user-management-app</code>
+      <strong>In k3d</strong>, the NodePort exists inside the k3d container, but the container is
+      <strong>not your laptop</strong>. The Node has an internal Docker IP (e.g. <code>172.19.0.2</code>)
+      that your browser can't reach directly. k3d maps it to your localhost instead, so you access it as:
+    </p>
+    <pre><code>[ Browser / WSL ]
+      &darr;
+localhost:30007          (you type this)
+      &darr;
+Docker port mapping
+      &darr;
+k3d node container (172.19.0.2)
+      &darr;
+NodePort (30007)
+      &darr;
+kube-proxy
+      &darr;
+Pod</code></pre>
+
+    <h3>Working with NodePorts</h3>
+    <p>Create a Service that exposes the Deployment named <code>user-management-app</code>:</p>
+    <pre><code>kubectl expose deployment/user-management-app --type="NodePort" --port 8082 --name=user-management-svc-nodeport -n user-management-app</code></pre>
+
+    <p>
+      This creates a Service of type <code>NodePort</code> to expose the <code>user-management-app</code>
       Deployment. The name of this service is <code>user-management-svc-nodeport</code>.
-      Kubernetes assigns a port on each Node (in the range <code>30000–32767</code>), and forwards traffic to port 8082
-      in the Pods.
+      Kubernetes assigns a port on each Node (in the range <code>30000&ndash;32767</code>), and forwards
+      traffic to port 8082 in the Pods.
     </p>
 
     <pre><code>kubectl get svc user-management-svc-nodeport -n user-management-app
 # Example output:
 # NAME                         TYPE       CLUSTER-IP     EXTERNAL-IP   PORT(S)          AGE
 # user-management-svc-nodeport NodePort   10.43.56.235   none          8082:31776/TCP   6m
-# The "31776" is the NodePort assigned by Kubernetes.
-</code></pre>
+# The "31776" is the NodePort assigned by Kubernetes.</code></pre>
 
-    <p>
-      To access your application from outside the cluster:
+    <p>To access your application from outside the cluster:</p>
     <ul>
       <li>Use the <strong>Node IP</strong> of your Kubernetes node plus the NodePort.</li>
-      <li>Example: check the node IP using <code>kubectl get nodes -o wide</code>:
+      <li>Check the node IP using <code>kubectl get nodes -o wide</code>:
         <pre><code>kubectl get nodes -o wide
 # Example output:
-NAME                                 STATUS   ROLES                  AGE   VERSION        INTERNAL-IP   EXTERNAL-IP   OS-IMAGE           KERNEL-VERSION                     CONTAINER-RUNTIME
-k3d-user-management-local-server-0   Ready    control-plane,master   16d   v1.31.5+k3s1   172.19.0.4    <none>        K3s v1.31.5+k3s1   6.6.87.2-microsoft-standard-WSL2   containerd://1.7.23-k3s2
-</code></pre>
+# NAME                                 STATUS   ROLES                  AGE   VERSION        INTERNAL-IP   EXTERNAL-IP
+# k3d-user-management-local-server-0   Ready    control-plane,master   16d   v1.31.5+k3s1   172.19.0.4    &lt;none&gt;</code></pre>
       </li>
-      <li>In WSL2, the node's INTERNAL-IP (<code>172.19.0.4</code>) is inside Docker network and usually not reachable
-        from Windows.</li>
-      <li>Instead, use the WSL2 host IP (from <code>hostname -I</code>), e.g., <code>172.26.41.222</code>:
+      <li>In WSL2, the node's INTERNAL-IP (<code>172.19.0.4</code>) is inside the Docker network and usually not
+        reachable from Windows.</li>
+      <li>Instead, use the WSL2 host IP (from <code>hostname -I</code>), e.g. <code>172.26.41.222</code>:
         <pre><code>hostname -I
 # Example output:
-172.26.41.222 172.119.0.1
-</code></pre>
+# 172.26.41.222 172.119.0.1</code></pre>
       </li>
     </ul>
-    Example URL from Windows or outside the WSL2 VM:
-    <code>http://172.26.41.222:31776</code>
+    <p>
+      Example URL from Windows or outside the WSL2 VM:
+      <code>http://172.26.41.222:31776</code>
     </p>
 
-
+    <h3>Port Forwarding &mdash; The Easy Way to Test Any Service</h3>
     <p>
-      ⚡ Alternative approach using <code>kubectl port-forward</code>:
-      You can directly port-forward to the <strong>ClusterIP Service</strong> instead of using NodePort.
-
-    <h4>Why Port Forwarding?</h4>
-    <p>A <code>ClusterIP</code> service is accessible only inside the cluster. Your laptop/localhost is outside. Use
-      port-forwarding to create a temporary tunnel for local testing.</p>
+      Whether you have a ClusterIP or NodePort Service, you can always use <code>kubectl port-forward</code>
+      to access it from your local machine without worrying about Node IPs or Docker port mappings:
+    </p>
     <pre><code>kubectl port-forward svc/user-management-svc 8082:8082 -n user-management-app</code></pre>
-
-    <p>Now test at <code>http://localhost:8082</code>
-      <br>
-      This forwards traffic from your local host directly to the ClusterIP service inside the cluster.
-      This avoids NodePort networking issues and directly forwards traffic from your host to the Service.
+    <p>
+      Then open <code>http://localhost:8082</code>. This creates a temporary tunnel from your machine
+      directly into the cluster, bypassing all the NodePort networking complexity.
     </p>
 
     <div class="note">
-      <strong>svc/&nbsp;vs&nbsp;deploy/ port-forward:</strong>
+      <strong>svc/ vs deploy/ port-forward:</strong>
       <ul>
-        <li><strong>svc/&nbsp;port-forward</strong> (service-level) forwards traffic to the Service's targets; it
-          follows the Service selector and will load-balance between pods matching the selector.</li>
-        <li><strong>deploy/&nbsp;port-forward</strong> (deployment/pod-level) forwards directly to a Pod selected by the
-          Deployment (kubectl resolves to a single pod behind the deployment). Use it when you want to debug a specific
-          pod instance.</li>
+        <li><strong>svc/ port-forward</strong> (service-level) follows the Service selector and will
+          load-balance between Pods matching the selector.</li>
+        <li><strong>deploy/ port-forward</strong> (deployment/pod-level) forwards directly to a single
+          Pod resolved from the Deployment. Use it when you want to debug a specific Pod instance.</li>
       </ul>
     </div>
 
@@ -496,7 +574,7 @@ spec:
       Accessing your services via Ingress
     </h4>
     <ul>
-      <li>In WSL2, the Linux VM has its own network namespace. Your cluster’s Node IP (e.g., <code>172.19.0.4</code>) is
+      <li>In WSL2, the Linux VM has its own network namespace. Your cluster's Node IP (e.g., <code>172.19.0.4</code>) is
         usually internal to Docker/k3d and not directly reachable from Windows.</li>
       <li>The WSL2 host IP (from <code>hostname -I</code>, e.g., <code>172.26.41.222</code>) is reachable from your
         Windows host. Adding this IP with the hostname <code>curity.local</code> in the hosts file allows your browser
@@ -516,14 +594,14 @@ spec:
           <li>Admin service: <code>https://curity.local/admin</code></li>
         </ul>
       </li>
-      <li>⚡ Tip: If you encounter HTTPS certificate warnings, accept the self-signed certificate for testing purposes.
+      <li>Tip: If you encounter HTTPS certificate warnings, accept the self-signed certificate for testing purposes.
       </li>
     </ul>
 
 
     <h4>Accessing from inside the same cluster</h4>
     <p>
-      From a Pod inside the same cluster, you don’t need to go through the Ingress hostname unless you want to test the
+      From a Pod inside the same cluster, you don't need to go through the Ingress hostname unless you want to test the
       exact external route. The most common and efficient way to access services inside the cluster is via the Service
       DNS.
     </p>
@@ -591,7 +669,7 @@ traefik   traefik.io/ingress-controller   none         16d
     <h3>Setting Up a Local k3d Cluster and NGINX Ingress</h3>
     <p>
       In the previous section, you learned how to expose services using the Traefik Ingress Controller.
-      Here, let’s explore the same concept using the <strong>NGINX Ingress Controller</strong> and a new demo
+      Here, let's explore the same concept using the <strong>NGINX Ingress Controller</strong> and a new demo
       application.
     </p>
 
@@ -614,7 +692,7 @@ traefik   traefik.io/ingress-controller   none         16d
       <li>
         <strong><code>--k3s-arg "--disable=traefik@server:0"</code></strong> disables the default Traefik Ingress
         Controller that comes
-        preinstalled with k3s. This ensures there’s no conflict when you later install the NGINX Ingress Controller
+        preinstalled with k3s. This ensures there's no conflict when you later install the NGINX Ingress Controller
         manually.
       </li>
     </ul>
@@ -644,23 +722,23 @@ helm install nginx-ingress ingress-nginx/ingress-nginx \
 
       <li>
         <strong><code>helm install nginx-ingress ingress-nginx/ingress-nginx</code></strong><br />
-        - <code>nginx-ingress</code> is the <em>release name</em> — a name you choose to identify this installation of
+        - <code>nginx-ingress</code> is the <em>release name</em> &mdash; a name you choose to identify this installation of
         the chart within your cluster.
         - <code>ingress-nginx/ingress-nginx</code> refers to the <em>chart path</em>:
         <ul>
           <li>The first <code>ingress-nginx</code> refers to the repository you added earlier.</li>
           <li>The second <code>ingress-nginx</code> is the actual chart name inside that repository.</li>
         </ul>
-        - Together, this means: “Install the <code>ingress-nginx</code> chart from the <code>ingress-nginx</code> repo,
-        and call this deployment <code>nginx-ingress</code>.”
+        - Together, this means: "Install the <code>ingress-nginx</code> chart from the <code>ingress-nginx</code> repo,
+        and call this deployment <code>nginx-ingress</code>."
       </li>
 
       <li>
-        <strong><code>--namespace demo-nginx-ingress</code></strong> — Creates and deploys into a dedicated namespace
+        <strong><code>--namespace demo-nginx-ingress</code></strong> &mdash; Creates and deploys into a dedicated namespace
         for the ingress controller.
       </li>
       <li>
-        <strong><code>--set controller.publishService.enabled=true</code></strong> — Ensures NGINX advertises its
+        <strong><code>--set controller.publishService.enabled=true</code></strong> &mdash; Ensures NGINX advertises its
         external IP through a Service, so external clients can route traffic correctly.
       </li>
     </ul>
@@ -774,17 +852,17 @@ Hello from NGINX Ingress!
     <ol>
       <li>You type <code>http://demo.local</code> in your browser.</li>
       <li>Windows checks the hosts file first.</li>
-      <li>It finds <code>demo.local</code> → <code>127.0.0.1</code>.</li>
+      <li>It finds <code>demo.local</code> &rarr; <code>127.0.0.1</code>.</li>
       <li>The HTTP request is sent to <code>127.0.0.1</code> (your local machine).</li>
-      <li>Flow: <code>Browser → 127.0.0.1:80 → k3d LoadBalancer → NGINX Ingress → demo-app</code></li>
+      <li>Flow: <code>Browser &rarr; 127.0.0.1:80 &rarr; k3d LoadBalancer &rarr; NGINX Ingress &rarr; demo-app</code></li>
     </ol>
 
 
-    <h3>Service → External IP (Service + Endpoints)</h3>
+    <h3>Service &rarr; External IP (Service + Endpoints)</h3>
     <p>
       Sometimes Pods inside your cluster need to communicate with a service running <strong>outside the cluster</strong>
       (e.g., a legacy backend, a database on your host machine, or another service not containerized).
-      Kubernetes doesn’t automatically route <code>localhost</code> from inside Pods to your Windows host — especially
+      Kubernetes doesn't automatically route <code>localhost</code> from inside Pods to your Windows host &mdash; especially
       when
       running under WSL2 or k3d. Instead, you can use a Service + Endpoints pair to bridge traffic.
     </p>
@@ -855,7 +933,7 @@ curl http://external-backend-svc:8088
 
     <p>
       If the setup is correct, this <code>curl</code> will hit the Windows service running at
-      <code>172.26.41.222:8088</code>, but from the Pod’s perspective, it looks like a normal Kubernetes Service.
+      <code>172.26.41.222:8088</code>, but from the Pod's perspective, it looks like a normal Kubernetes Service.
     </p>
 
     <h4>How this works:</h4>
@@ -871,13 +949,13 @@ curl http://external-backend-svc:8088
         (in this case, <code>172.26.41.222</code>, your WSL2 host IP). This tells Kubernetes where to actually send
         traffic.</li>
       <li>Kubernetes proxies requests:
-        <code>Pod (8082 → outbound request) → Service (ClusterIP 8088) → Endpoints → External host IP (172.26.41.222:8088)</code>.
+        <code>Pod (8082 &rarr; outbound request) &rarr; Service (ClusterIP 8088) &rarr; Endpoints &rarr; External host IP (172.26.41.222:8088)</code>.
       </li>
     </ul>
 
     <h4>Why is this needed?</h4>
     <ul>
-      <li>Inside WSL2, the Linux VM has its own network namespace. Your cluster’s Node IP (e.g.,
+      <li>Inside WSL2, the Linux VM has its own network namespace. Your cluster's Node IP (e.g.,
         <code>172.19.0.4</code>) is usually internal to Docker/k3d and not directly reachable from Windows.
       </li>
       <li>The WSL2 host IP (from <code>hostname -I</code>, e.g., <code>172.26.41.222</code>) is reachable from Windows
@@ -889,24 +967,24 @@ curl http://external-backend-svc:8088
       <li>By creating a Service + Endpoints pair, you give Pods a stable DNS name inside the cluster
         while actually routing traffic outside to Windows or another machine.</li>
       <li>When Pods talk to the internet (like calling <code>https://api.github.com</code>),
-        they <em>don’t need</em> this — cluster networking and NAT already handle external routing.
+        they <em>don't need</em> this &mdash; cluster networking and NAT already handle external routing.
         This trick is only for routing to services bound to your host machine or private network IPs.</li>
     </ul>
 
     <h4>Example use case:</h4>
     <ul>
-      <li>You’re running a MongoDB instance on Windows bound to <code>localhost:27017</code>.</li>
+      <li>You're running a MongoDB instance on Windows bound to <code>localhost:27017</code>.</li>
       <li>Your Pod in WSL2 needs to connect to that DB.</li>
       <li>You expose it in Kubernetes as <code>external-backend-svc</code> and the Pod just connects to
         <code>mongodb://external-backend-svc:27017</code>.
       </li>
     </ul>
 
-    <p>⚡ Tip: On Windows + WSL2, get the reachable host IP with:</p>
+    <p>Tip: On Windows + WSL2, get the reachable host IP with:</p>
     <pre><code>hostname -I   # e.g., 172.26.41.222
 </code></pre>
     <p>
-      Add that IP in your Endpoints object. If it changes (like after a reboot), you’ll need to update the Endpoints.
+      Add that IP in your Endpoints object. If it changes (like after a reboot), you'll need to update the Endpoints.
       For a more permanent solution, you can run a reverse proxy inside the cluster or use
       <code>host.docker.internal</code>. But, this is supported only in Docker Desktop (Windows/Mac) and not supported
       in Docker on Linux, k3d, WSL2 + k3d.
@@ -928,13 +1006,13 @@ curl http://external-backend-svc:8088
     </p>
     <p>So the traffic flow is:</p>
     <ul>
-      <li><strong>Deployment-backed Service:</strong> <code>Service.port → Service.targetPort → Pod.containerPort</code>
+      <li><strong>Deployment-backed Service:</strong> <code>Service.port &rarr; Service.targetPort &rarr; Pod.containerPort</code>
       </li>
-      <li><strong>External Service:</strong> <code>Service.port → Service.targetPort → Endpoints.port</code></li>
+      <li><strong>External Service:</strong> <code>Service.port &rarr; Service.targetPort &rarr; Endpoints.port</code></li>
     </ul>
 
 
-    <h3>ConfigMaps — store non-sensitive configuration</h3>
+    <h3>ConfigMaps &mdash; store non-sensitive configuration</h3>
     <p>ConfigMaps keep configuration separate from images. Two common usage patterns are: mount as files, or inject as
       environment variables.</p>
 
@@ -950,7 +1028,7 @@ data:
   APP_VERSION: "1.0.0"
   LOG_LEVEL: "debug"</code></pre>
 
-    <h4>Scenario A — ConfigMap as environment variables</h4>
+    <h4>Scenario A &mdash; ConfigMap as environment variables</h4>
     <pre><code># deployment-configmap-env.yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -982,12 +1060,12 @@ kubectl get pods -n user-management-app
 kubectl exec -it &lt;pod-name&gt; -n user-management-app -- env | grep APP_MODE</code></pre>
 
     <div class="note">
-      Environment variables are injected at pod start. If you update the ConfigMap, running pods won’t automatically see
-      new env values — you must restart or rollout the Deployment
+      Environment variables are injected at pod start. If you update the ConfigMap, running pods won't automatically see
+      new env values &mdash; you must restart or rollout the Deployment
       (<code>kubectl rollout restart deployment/&lt;name&gt; -n &lt;ns&gt;</code>).
     </div>
 
-    <h4>Scenario B — ConfigMap mounted as files</h4>
+    <h4>Scenario B &mdash; ConfigMap mounted as files</h4>
     <pre><code># deployment-configmap-file.yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -1026,7 +1104,7 @@ kubectl exec -it &lt;pod-name&gt; -n user-management-app -- cat /config/APP_MODE
       application must re-read the file (or watch for changes) to pick up new values.
     </div>
 
-    <h3>Secrets — store sensitive data (with caution)</h3>
+    <h3>Secrets &mdash; store sensitive data (with caution)</h3>
     <p>Secrets store sensitive strings (passwords, keys). They are base64-encoded when stored in YAML but are not
       encrypted in etcd unless you enable encryption at rest.</p>
 
@@ -1045,7 +1123,7 @@ data:
   DB_USER: dXNlcg==
   DB_PASSWORD: cGFzc3dvcmQ=</code></pre>
 
-    <h4>Scenario A — Secret as environment variables</h4>
+    <h4>Scenario A &mdash; Secret as environment variables</h4>
     <pre><code># deployment-secret-env.yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -1077,10 +1155,10 @@ kubectl exec -it &lt;pod-name&gt; -n user-management-app -- printenv | grep DB_<
 
     <div class="note">
       Like ConfigMap envs, secret values injected as environment variables are set at pod start and do not update
-      automatically on secret change — restart the pods or rollout.
+      automatically on secret change &mdash; restart the pods or rollout.
     </div>
 
-    <h4>Scenario B — Secret mounted as files</h4>
+    <h4>Scenario B &mdash; Secret mounted as files</h4>
     <pre><code># deployment-secret-file.yaml
 apiVersion: apps/v1
 kind: Deployment

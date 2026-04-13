@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description"
+    content="Learn how to export, clean, apply, and test Kyverno policies in Kubernetes with a real-world example using disallow-latest-tag." />
+  <meta name="keywords"
+    content="Kyverno, Kubernetes, K8s, ClusterPolicy, Policy, CRD, Admission Controller, Security, DevOps, Kubernetes security, Kyverno tutorial" />
+  <meta name="author" content="Ilman Iqbal" />
+  <title>Understanding Kyverno Policies: Export, Apply, and Enforce Kubernetes Security</title>
+
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Article",
+      "headline": "Understanding Kyverno Policies: Export, Apply, and Enforce Kubernetes Security",
+      "author": {
+          "@type": "Person",
+          "name": "Ilman Iqbal",
+          "url": "https://www.linkedin.com/in/ilman-iqbal-096308172"
+      },
+      "publisher": {
+          "@type": "Organization",
+          "name": "Ilman Iqbal",
+          "url": "https://ilmaniqbal.com",
+          "logo": {
+              "@type": "ImageObject",
+              "url": "https://ilmaniqbal.com/img/logo.png"
+          }
+      },
+      "datePublished": "2026-04-13",
+      "dateModified": "2026-04-13",
+      "description": "Step-by-step guide to exporting, cleaning, applying, and testing Kyverno policies in Kubernetes.",
+      "articleSection": ["Kyverno", "Kubernetes Security", "ClusterPolicy", "Admission Controller"],
+      "inLanguage": "en",
+      "keywords": "Kyverno, Kubernetes, K8s, ClusterPolicy, Policy, CRD, Admission Controller, Security, DevOps",
+      "mainEntityOfPage": {
+        "@type": "WebPage",
+        "@id": "https://ilmaniqbal.com/kyverno-policies-guide.html"
+      }
+    }
+  </script>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+Pro&display=swap" rel="stylesheet" />
+  <link href="css/bootstrap.min.css" rel="stylesheet">
+  <link href="css/blog.css" rel="stylesheet">
+</head>
+
+<body>
+  <div class="container">
+
+    <header class="site-header">
+      <a href="index.html" class="site-logo-wrapper" style="text-decoration: none; color: inherit;">
+        <div class="site-logo"><i class="fas fa-shield-alt fa-2x"></i></div>
+        <h1>Ilman Iqbal's Blog</h1>
+      </a>
+    </header>
+
+    <h2 class="tm-post-title">Understanding Kyverno Policies: Export, Apply, and Enforce Kubernetes Security</h2>
+    <p class="meta">Apr 13, 2026 posted by Ilman Iqbal</p>
+
+    <p>
+      Kubernetes lets you deploy and manage containers at scale, but out of the box it won't stop you
+      from doing risky things &mdash; like running containers with the <code>latest</code> tag or
+      deploying into the <code>default</code> namespace. There are no built-in guardrails.
+    </p>
+    <p>
+      <strong>Kyverno</strong> fixes that. It's a policy engine built for Kubernetes that lets you
+      write rules as plain YAML &mdash; no new language to learn &mdash; that automatically check,
+      modify, or even create resources whenever someone runs <code>kubectl apply</code>.
+    </p>
+    <p>
+      In this guide, we'll take a real policy &mdash; one that blocks the <code>latest</code> image
+      tag &mdash; and walk through every step: exporting it from a live cluster, cleaning it up,
+      applying it to a fresh environment, and testing that it actually works.
+    </p>
+
+    <h3>What are Kyverno Policies?</h3>
+    <p>
+      A Kyverno policy is just a Kubernetes resource (a YAML file you <code>kubectl apply</code>)
+      that describes a rule you want enforced. Policies can do three things:
+    </p>
+    <ul>
+      <li><strong>Validate</strong> &mdash; reject resources that break your rules (e.g. "no <code>latest</code> tag")</li>
+      <li><strong>Mutate</strong> &mdash; automatically patch resources on the fly (e.g. inject a sidecar container)</li>
+      <li><strong>Generate</strong> &mdash; create new resources in response to events (e.g. auto-create a NetworkPolicy when a namespace appears)</li>
+    </ul>
+    <p>
+      There are two scopes:
+    </p>
+    <ul>
+      <li><strong>ClusterPolicy</strong> &mdash; applies across the entire cluster</li>
+      <li><strong>Policy</strong> &mdash; applies only within a single namespace</li>
+    </ul>
+
+    <h3>Listing Existing Policies</h3>
+    <p>To see policies in your cluster:</p>
+    <pre><code>kubectl get cpol -n kyverno --context my-cluster-aks</code></pre>
+
+    <p>Example output:</p>
+    <pre><code>NAME                               READY   AGE
+check-ingress-annotation           True    50d
+deploy-cdc-sync-to-app-namespaces  True    49d
+disallow-default-namespace         True    50d
+disallow-latest-tag                True    50d</code></pre>
+
+    <p>Some example policies:</p>
+    <ul>
+      <li><strong>disallow-latest-tag</strong> &mdash; Blocks use of latest image tag</li>
+      <li><strong>disallow-default-namespace</strong> &mdash; Prevents use of default namespace</li>
+      <li><strong>check-ingress-annotation</strong> &mdash; Enforces annotations</li>
+      <li><strong>deploy-cdc-sync-to-app-namespaces</strong> &mdash; Auto-creates resources</li>
+    </ul>
+
+    <h3>Exporting Policies</h3>
+
+    <h4>Export all policies</h4>
+    <pre><code>kubectl get cpol -n kyverno --context my-cluster-aks -o yaml > kyverno-cluster-policies.yaml</code></pre>
+
+    <h4>Export a single policy</h4>
+    <pre><code>kubectl get cpol disallow-latest-tag -n kyverno --context my-cluster-aks -o yaml > disallow-latest-tag-policy.yaml</code></pre>
+
+    <h3>Cleaning the YAML</h3>
+    <p>
+      Exported YAML contains runtime metadata that must be removed before reapplying.
+    </p>
+
+    <p>Remove fields like:</p>
+    <pre><code>metadata:
+  annotations:
+  creationTimestamp:
+  resourceVersion:
+  uid:
+  managedFields:
+  generation:
+status:</code></pre>
+
+    <p class="note">
+      Note: The <code>status</code> section must always be removed. It contains runtime data and will cause apply errors.
+    </p>
+
+    <h3>Final Clean Policy</h3>
+
+    <pre><code>apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-latest-tag
+spec:
+  validationFailureAction: Enforce
+  rules:
+    - name: require-image-tag
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: An image tag is required.
+        pattern:
+          spec:
+            containers:
+              - image: "*:*"
+
+    - name: validate-image-tag
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: Using 'latest' is not allowed.
+        pattern:
+          spec:
+            containers:
+              - image: "!*:latest"</code></pre>
+
+    <h3>What This Policy Does</h3>
+
+    <p>&#10060; Not allowed:</p>
+    <pre><code>image: nginx:latest
+image: nginx</code></pre>
+
+    <p>&#9989; Allowed:</p>
+    <pre><code>image: nginx:1.25.3</code></pre>
+
+    <h3>Applying the Policy</h3>
+    <p>Apply this policy to your cluster:</p>
+    <pre><code>kubectl apply -f disallow-latest-tag-policy.yaml --context k3d-user-management-local</code></pre>
+
+    <h4>No Kyverno? You'll Get an Error</h4>
+    <p>
+      If Kyverno is not installed in this cluster, the command above will fail with:
+    </p>
+    <pre><code>error: resource mapping not found for name: "disallow-latest-tag" namespace: ""
+from "disallow-latest-tag-policy.yaml": no matches for kind "ClusterPolicy" in version "kyverno.io/v1"
+ensure CRDs are installed first</code></pre>
+
+    <p>
+      This happens because Kyverno is <strong>not installed</strong> in this cluster. Kubernetes only
+      understands built-in resources like Pod, Deployment, and Service. But <code>ClusterPolicy</code>
+      is a Custom Resource (CRD) provided by Kyverno. No Kyverno = No CRD = error.
+    </p>
+
+    <h3>Installing Kyverno in k3d</h3>
+
+    <p>First, add the Kyverno Helm repo:</p>
+    <pre><code>helm repo add kyverno https://kyverno.github.io/kyverno/</code></pre>
+
+    <p>
+      Then switch your kubectl context. Helm does <strong>not</strong> support <code>--context</code>
+      in <code>helm install</code>, so you need to switch first:
+    </p>
+    <pre><code>kubectl config use-context k3d-user-management-local</code></pre>
+
+    <p>Now install Kyverno:</p>
+    <pre><code>helm install kyverno kyverno/kyverno -n kyverno --create-namespace</code></pre>
+
+    <h4>Wait Until Ready</h4>
+    <pre><code>kubectl get pods -n kyverno</code></pre>
+
+    <h4>Verify CRDs Exist</h4>
+    <pre><code>kubectl get crds | grep kyverno</code></pre>
+    <p>You should see:</p>
+    <pre><code>clusterpolicies.kyverno.io
+policies.kyverno.io</code></pre>
+
+    <h4>Apply Your Policy Again</h4>
+    <pre><code>kubectl apply -f disallow-latest-tag-policy.yaml</code></pre>
+
+    <h4>Quick Sanity Check</h4>
+    <pre><code>kubectl get cpol</code></pre>
+    <p>If this returns your policy, Kyverno is installed correctly and the policy is active.</p>
+
+    <h3>Testing the Policy</h3>
+
+    <h4>1. Create a Bad Pod</h4>
+    <p>Create a file called <code>bad-pod.yaml</code> with the following contents:</p>
+    <pre><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: bad-pod
+spec:
+  containers:
+    - name: nginx
+      image: nginx:latest</code></pre>
+
+    <p>Apply it:</p>
+    <pre><code>kubectl apply -f bad-pod.yaml</code></pre>
+
+    <p>Kyverno blocks it. You'll see an error like this:</p>
+    <pre><code>Error from server: error when creating "bad-pod.yaml": admission webhook
+"validate.kyverno.svc-fail" denied the request:
+
+resource Pod/default/bad-pod was blocked due to the following policies
+
+disallow-latest-tag:
+  validate-image-tag: 'validation error: Using a mutable image tag e.g. latest
+    is not allowed. rule validate-image-tag failed at path
+    /spec/containers/0/image/'</code></pre>
+
+    <h4>2. Create a Good Pod</h4>
+    <p>Create a file called <code>good-pod.yaml</code> with the following contents:</p>
+    <pre><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: good-pod
+spec:
+  containers:
+    - name: nginx
+      image: nginx:1.25</code></pre>
+
+    <p>Apply it:</p>
+    <pre><code>kubectl apply -f good-pod.yaml</code></pre>
+
+    <p>This time it works:</p>
+    <pre><code>pod/good-pod created</code></pre>
+
+    <h3>What Happens When Kyverno Blocks a Request?</h3>
+
+    <p>The flow looks like this:</p>
+    <pre><code>kubectl apply &rarr; API Server &rarr; Kyverno webhook &rarr; &#10060; BLOCK</code></pre>
+
+    <p>
+      Kyverno logs the reason inside the admission controller pod. When Kyverno blocks a request,
+      the Pod is <strong>never created</strong>, so <code>kubectl describe pod bad-pod</code> won't
+      work. But you can still see what happened in two ways:
+    </p>
+
+    <h4>Check Kyverno Logs</h4>
+    <pre><code>kubectl logs -n kyverno deploy/kyverno-admission-controller -f</code></pre>
+
+    <h4>Check Kubernetes Events</h4>
+    <pre><code>kubectl get events --sort-by=.metadata.creationTimestamp</code></pre>
+
+    <p>You'll see something like:</p>
+    <pre><code>LAST SEEN   TYPE      REASON            OBJECT                              MESSAGE
+13m         Warning   PolicyViolation   clusterpolicy/disallow-latest-tag   Pod default/bad-pod:
+  [validate-image-tag] fail (blocked); validation error: Using a mutable image tag
+  e.g. 'latest' is not allowed. rule validate-image-tag failed at path
+  /spec/containers/0/image/</code></pre>
+
+    <h3>Disabling or Bypassing Policies</h3>
+
+    <h4>1. Switch to Audit Mode</h4>
+    <p>
+      Edit your <code>disallow-latest-tag-policy.yaml</code> and change the validation action:
+    </p>
+    <pre><code>spec:
+  validationFailureAction: Audit</code></pre>
+
+    <p>Then re-apply:</p>
+    <pre><code>kubectl apply -f disallow-latest-tag-policy.yaml</code></pre>
+    <pre><code>clusterpolicy.kyverno.io/disallow-latest-tag configured</code></pre>
+
+    <p>Now the bad pod goes through:</p>
+    <pre><code>kubectl apply -f bad-pod.yaml</code></pre>
+    <pre><code>pod/bad-pod created</code></pre>
+
+    <p>
+      The policy still runs, but it only <strong>logs</strong> violations instead of blocking them.
+    </p>
+
+    <h4>2. Temporarily Disable All Policies</h4>
+    <p>Scale down the Kyverno admission controller to stop all policy enforcement:</p>
+    <pre><code>kubectl scale deployment kyverno-admission-controller -n kyverno --replicas=0</code></pre>
+
+    <p>
+      The cluster becomes <strong>unprotected</strong> &mdash; no policies perform any validations
+      or blockings.
+    </p>
+
+    <p>To re-enable:</p>
+    <pre><code>kubectl scale deployment kyverno-admission-controller -n kyverno --replicas=1</code></pre>
+
+    <h4>3. Skip Policy via Annotation</h4>
+    <p>Add this annotation to your pod YAML to bypass Kyverno for a specific resource:</p>
+    <pre><code>metadata:
+  annotations:
+    policies.kyverno.io/ignore: "true"</code></pre>
+
+    <h4>4. Remove the Policy Completely</h4>
+    <pre><code>kubectl delete cpol disallow-latest-tag</code></pre>
+    <p>The policy is deleted and no longer enforced.</p>
+
+    <h3>Final Thoughts</h3>
+    <p>
+      Kyverno brings policy-as-code into Kubernetes in a very natural way. Instead of relying on external tools,
+      you define security rules as Kubernetes resources.
+    </p>
+
+    <p>
+      In production environments, policies like <strong>disallow-latest-tag</strong> are critical to ensure
+      immutability, traceability, and safer deployments.
+    </p>
+
+</body>
+</html>

@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description"
+    content="Learn Kubernetes Deployment Strategies, Health Probes, Resource Requests and Limits, Persistent Volumes, and Storage Classes with hands-on manifest examples." />
+  <meta name="keywords"
+    content="Kubernetes, K8s, Deployment Strategy, RollingUpdate, Recreate, Liveness Probe, Readiness Probe, Startup Probe, Resource Requests, Resource Limits, CPU, Memory, Ephemeral Storage, PersistentVolume, PersistentVolumeClaim, StorageClass, Image Pull Policy, Revision History, Kubernetes tutorial, Kubernetes guide" />
+  <meta name="author" content="Ilman Iqbal" />
+  <title>Kubernetes Deployment Strategies, Health Probes, Resource Limits, Persistent Volumes and Storage Classes</title>
+
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Article",
+      "headline": "Kubernetes Deployment Strategies, Health Probes, Resource Limits, Persistent Volumes and Storage Classes",
+      "author": {
+          "@type": "Person",
+          "name": "Ilman Iqbal",
+          "url": "https://www.linkedin.com/in/ilman-iqbal-096308172"
+      },
+      "publisher": {
+          "@type": "Organization",
+          "name": "Ilman Iqbal",
+          "url": "https://ilmaniqbal.com",
+          "logo": {
+              "@type": "ImageObject",
+              "url": "https://ilmaniqbal.com/img/logo.png"
+          }
+      },
+      "datePublished": "2026-04-13",
+      "dateModified": "2026-04-13",
+      "image": "https://ilmaniqbal.com/img/k8s-1.png",
+      "description": "Hands-on guide to Kubernetes Deployment Strategies (Recreate, RollingUpdate), Health Probes (Liveness, Readiness, Startup), Resource Requests and Limits (CPU, Memory, Ephemeral Storage), Image Pull Policy, Revision History, Persistent Volumes, and Storage Classes.",
+      "articleSection": [
+        "Deployment Strategies",
+        "Revision History Limit",
+        "Image Pull Policy",
+        "Health Probes",
+        "Resource Requests and Limits",
+        "Persistent Volumes and Claims",
+        "Storage Classes"
+      ],
+      "inLanguage": "en",
+      "keywords": "Kubernetes, K8s, Deployment Strategy, RollingUpdate, Recreate, Liveness Probe, Readiness Probe, Startup Probe, Resource Requests, Resource Limits, CPU, Memory, Ephemeral Storage, PersistentVolume, PersistentVolumeClaim, StorageClass, Image Pull Policy, Revision History",
+      "mainEntityOfPage": {
+        "@type": "WebPage",
+        "@id": "https://ilmaniqbal.com/kubernetes-deployment-strategies-probes-resources-storage.html"
+      }
+    }
+  </script>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+Pro&display=swap" rel="stylesheet" />
+  <link href="css/bootstrap.min.css" rel="stylesheet">
+  <link href="css/blog.css" rel="stylesheet">
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-8PPCHX9PDV"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag() { dataLayer.push(arguments); }
+    gtag('js', new Date());
+
+    gtag('config', 'G-8PPCHX9PDV');
+  </script>
+</head>
+
+<body>
+  <div class="container">
+
+    <header class="site-header">
+      <a href="index.html" class="site-logo-wrapper" style="text-decoration: none; color: inherit;">
+        <div class="site-logo"><i class="fas fa-code fa-2x"></i></div>
+        <h1>Ilman Iqbal's Blog</h1>
+      </a>
+    </header>
+
+    <h2 class="tm-post-title">Kubernetes Deployment Strategies, Health Probes, Resource Limits, Persistent Volumes and
+      Storage Classes</h2>
+    <p class="meta">Apr 13, 2026 posted by Ilman Iqbal</p>
+
+    <p>
+      Learn how to configure Deployment strategies for zero-downtime updates, use health probes (liveness, readiness,
+      startup) to keep your applications self-healing, set resource requests and limits for CPU, memory, and ephemeral
+      storage, and attach persistent storage using PersistentVolumeClaims and StorageClasses.
+    </p>
+
+    <img id="half-width" src="img/k8s-2.png" alt="kubernetes-deployment-strategies-probes-resources-storage" />
+
+    <h3>Full Deployment manifest example</h3>
+    <p>
+      To show how all the concepts in this post fit together, here is a complete Deployment manifest
+      that uses deployment strategies, revision history, image pull policy, health probes, resource limits,
+      and a PersistentVolumeClaim &mdash; all in one file:
+    </p>
+
+    <pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: identity-server
+  namespace: identity
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5                          # Keep last 5 ReplicaSets for rollback
+  strategy:
+    type: RollingUpdate                            # Gradually replace Pods (zero downtime)
+    rollingUpdate:
+      maxSurge: 1                                  # Allow 1 extra Pod during update
+      maxUnavailable: 0                            # Never take a running Pod down during update
+  selector:
+    matchLabels:
+      app: identity-server
+  template:
+    metadata:
+      labels:
+        app: identity-server
+    spec:
+      containers:
+      - name: identity-server
+        image: identity-server:2.1.0               # Versioned tag (not :latest)
+        imagePullPolicy: IfNotPresent               # Pull only if image is missing on the node
+        ports:
+        - containerPort: 8443
+          name: https
+        resources:
+          requests:
+            cpu: "250m"                            # 0.25 vCPU guaranteed
+            memory: "512Mi"                        # 512 MiB guaranteed
+            ephemeral-storage: "256Mi"             # 256 MiB disk for logs/temp files
+          limits:
+            cpu: "1000m"                           # Max 1 vCPU (throttled beyond this)
+            memory: "1Gi"                          # Max 1 GiB (OOMKilled beyond this)
+            ephemeral-storage: "1Gi"               # Max 1 GiB (Pod evicted beyond this)
+        startupProbe:                              # Handles slow JVM/identity-server boot
+          httpGet:
+            path: /healthz
+            port: 8443
+            scheme: HTTPS
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          failureThreshold: 30                     # 30 x 5s = up to 150s to start
+        livenessProbe:                             # Restarts container if stuck/dead
+          httpGet:
+            path: /healthz
+            port: 8443
+            scheme: HTTPS
+          initialDelaySeconds: 0                   # Starts immediately after startup probe succeeds
+          periodSeconds: 10
+          failureThreshold: 3
+        readinessProbe:                            # Removes Pod from Service if not ready
+          httpGet:
+            path: /ready
+            port: 8443
+            scheme: HTTPS
+          initialDelaySeconds: 0
+          periodSeconds: 5
+          failureThreshold: 3
+        volumeMounts:
+        - name: server-config
+          mountPath: /opt/identity/etc/init
+      volumes:
+      - name: server-config
+        persistentVolumeClaim:
+          claimName: identity-server-config
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: identity-server-config
+  namespace: identity
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
+</code></pre>
+
+    <p>The sections below explain each of these features in detail.</p>
+
+    <h3>Deployment Strategies</h3>
+    <p>Kubernetes supports different strategies for updating Pods in a Deployment. The strategy determines how old Pods
+      are replaced with new ones.</p>
+
+    <h4>Recreate</h4>
+    <pre><code>spec:
+  strategy:
+    type: Recreate</code></pre>
+    <ul>
+      <li>Deletes all existing Pods first, then creates new ones.</li>
+      <li>Causes <strong>downtime</strong> during the update.</li>
+      <li>Simple but not suitable for production workloads that need high availability.</li>
+    </ul>
+    <p>Use when the application cannot run multiple versions at the same time (e.g., database migrations that require
+      exclusive access).</p>
+
+    <h4>RollingUpdate (default)</h4>
+    <pre><code>spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%</code></pre>
+    <ul>
+      <li>Default strategy in Kubernetes.</li>
+      <li>Updates Pods gradually &mdash; no downtime.</li>
+    </ul>
+
+    <table>
+      <tr>
+        <th>Field</th>
+        <th>What it does</th>
+        <th>Example (replicas = 4)</th>
+      </tr>
+      <tr>
+        <td><code>maxSurge</code></td>
+        <td>Number of extra Pods allowed during the update</td>
+        <td>25% &rarr; 1 extra Pod can be created</td>
+      </tr>
+      <tr>
+        <td><code>maxUnavailable</code></td>
+        <td>Number of Pods allowed to be unavailable</td>
+        <td>25% &rarr; 1 Pod can go down</td>
+      </tr>
+    </table>
+
+    <p>Benefits: zero downtime, safer deployments, and automatic rollback if health checks fail.</p>
+
+    <h3>Revision History Limit</h3>
+    <pre><code>spec:
+  revisionHistoryLimit: 10</code></pre>
+    <ul>
+      <li>Defines how many old ReplicaSets are kept for rollback.</li>
+      <li>Default is <code>10</code>.</li>
+    </ul>
+    <p>Each Deployment update creates a new ReplicaSet. Old ones are preserved so you can roll back to previous
+      versions.</p>
+
+    <h4>Example</h4>
+    <ul>
+      <li><code>revisionHistoryLimit: 3</code> &rarr; only the last 3 versions are stored; older ones are deleted
+        automatically.</li>
+    </ul>
+
+    <table>
+      <tr>
+        <th>Trade-off</th>
+        <th>Impact</th>
+      </tr>
+      <tr>
+        <td>Lower value</td>
+        <td>Fewer rollback options, saves cluster resources</td>
+      </tr>
+      <tr>
+        <td>Higher value</td>
+        <td>More rollback flexibility, more storage usage</td>
+      </tr>
+    </table>
+
+    <h3>Image Pull Policy</h3>
+    <table>
+      <tr>
+        <th>Policy</th>
+        <th>Behaviour</th>
+        <th>Best for</th>
+      </tr>
+      <tr>
+        <td><code>IfNotPresent</code></td>
+        <td>Pull image only if not already on the node</td>
+        <td>Faster startup; local/dev clusters</td>
+      </tr>
+      <tr>
+        <td><code>Always</code></td>
+        <td>Always pull from registry, even if present</td>
+        <td>Ensures latest version; production with mutable tags</td>
+      </tr>
+      <tr>
+        <td><code>Never</code></td>
+        <td>Never pull; use only local images</td>
+        <td>Air-gapped environments or pre-loaded images</td>
+      </tr>
+    </table>
+
+    <pre><code>containers:
+- name: my-app
+  image: my-app:latest
+  imagePullPolicy: Always</code></pre>
+
+    <div class="tip">
+      Tip: when using the <code>:latest</code> tag, Kubernetes defaults to <code>Always</code>.
+      For versioned tags (e.g., <code>:1.2.3</code>), the default is <code>IfNotPresent</code>.
+      Prefer explicit versioned tags in production to avoid surprises.
+    </div>
+
+    <h3>Health Probes &mdash; Liveness, Readiness, and Startup</h3>
+    <p>Kubernetes uses probes to monitor the health of containers. Each probe type serves a distinct purpose.</p>
+
+    <h4>Liveness Probe</h4>
+    <p>Checks whether the container is still alive. If the probe fails, the container is
+      <strong>restarted</strong>.</p>
+    <pre><code>livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+  initialDelaySeconds: 15
+  periodSeconds: 10
+  failureThreshold: 3</code></pre>
+
+    <table>
+      <tr>
+        <th>Field</th>
+        <th>Purpose</th>
+      </tr>
+      <tr>
+        <td><code>initialDelaySeconds</code></td>
+        <td>Time to wait before the first check</td>
+      </tr>
+      <tr>
+        <td><code>periodSeconds</code></td>
+        <td>Interval between checks</td>
+      </tr>
+      <tr>
+        <td><code>failureThreshold</code></td>
+        <td>Consecutive failures before the container is restarted</td>
+      </tr>
+    </table>
+
+    <p>Use to detect stuck or deadlocked applications that are running but no longer functioning.</p>
+
+    <h4>Readiness Probe</h4>
+    <p>Checks whether the Pod is ready to serve traffic. If the probe fails, the Pod is <strong>removed from the Service
+        load balancer</strong> (no traffic is sent to it), but it is <em>not</em> restarted.</p>
+    <pre><code>readinessProbe:
+  httpGet:
+    path: /ready
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  failureThreshold: 3</code></pre>
+
+    <table>
+      <tr>
+        <th>Probe</th>
+        <th>On failure</th>
+      </tr>
+      <tr>
+        <td>Liveness</td>
+        <td>Container is restarted</td>
+      </tr>
+      <tr>
+        <td>Readiness</td>
+        <td>Pod is removed from Service endpoints (no traffic)</td>
+      </tr>
+    </table>
+
+    <p>Use to prevent sending traffic to Pods that are temporarily overloaded or still initializing dependencies.</p>
+
+    <h4>Startup Probe</h4>
+    <p>Used for slow-starting applications. While the startup probe is running, liveness and readiness probes are
+      <strong>disabled</strong>. Once the startup probe succeeds, the other probes take over.</p>
+    <pre><code>startupProbe:
+  exec:
+    command:
+    - cat
+    - /tmp/healthy
+  initialDelaySeconds: 10
+  failureThreshold: 30
+  periodSeconds: 10</code></pre>
+
+    <p>Use for heavy applications (e.g., identity servers, JVM-based apps) that need extended time to boot.
+      Without a startup probe, a slow-starting container might be killed by the liveness probe before it finishes
+      initializing.</p>
+
+    <h3>Resource Requests and Limits</h3>
+    <p>Every container in a Pod can declare <code>requests</code> (guaranteed minimum) and <code>limits</code>
+      (maximum allowed). Kubernetes uses these to schedule Pods onto Nodes and enforce resource boundaries.</p>
+
+    <pre><code>containers:
+- name: my-app
+  image: my-app:1.0
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+      ephemeral-storage: "500Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+      ephemeral-storage: "1Gi"</code></pre>
+
+    <h4>CPU, Memory, and Ephemeral Storage explained</h4>
+    <table>
+      <tr>
+        <th>Resource</th>
+        <th>Unit</th>
+        <th>Request (minimum guaranteed)</th>
+        <th>Limit (maximum allowed)</th>
+        <th>What happens on breach</th>
+      </tr>
+      <tr>
+        <td>CPU</td>
+        <td><code>m</code> (millicores). <code>1000m</code> = 1 vCPU</td>
+        <td>Scheduler reserves this much CPU on a Node</td>
+        <td>Container is throttled (slowed down), not killed</td>
+        <td>Throttling &mdash; slower performance</td>
+      </tr>
+      <tr>
+        <td>Memory</td>
+        <td><code>Mi</code>, <code>Gi</code></td>
+        <td>Scheduler reserves this much memory</td>
+        <td>Container is killed if it exceeds the limit</td>
+        <td>OOMKilled &mdash; container is terminated and restarted</td>
+      </tr>
+      <tr>
+        <td>Ephemeral Storage</td>
+        <td><code>Mi</code>, <code>Gi</code></td>
+        <td>Disk space reserved for logs, temp files, emptyDir</td>
+        <td>Pod is evicted if it exceeds the limit</td>
+        <td>Pod eviction &mdash; Pod is removed from the Node</td>
+      </tr>
+    </table>
+
+    <h4>How to decide resource values</h4>
+    <p>Setting the right values requires understanding your application's actual resource consumption:</p>
+    <ol>
+      <li><strong>Profile first, then set:</strong> Deploy the app without limits initially (or with generous limits).
+        Use monitoring tools to observe actual usage:
+        <pre><code>kubectl top pods -n &lt;namespace&gt;
+kubectl top nodes</code></pre>
+      </li>
+      <li><strong>Set requests to average usage:</strong> The request should reflect typical steady-state consumption.
+        This is what the scheduler uses to place Pods on Nodes.</li>
+      <li><strong>Set limits to peak usage + headroom:</strong> The limit should accommodate bursts (e.g., startup
+        spikes, occasional load). A good starting point is 1.5&ndash;2&times; the average.</li>
+      <li><strong>Iterate:</strong> Monitor in staging or production and adjust. Look for OOMKilled events
+        (memory limit too low) or throttling (CPU limit too low).</li>
+    </ol>
+
+    <h4>What should resource values depend on?</h4>
+    <table>
+      <tr>
+        <th>Factor</th>
+        <th>Impact on resources</th>
+      </tr>
+      <tr>
+        <td>Application type</td>
+        <td>CPU-intensive apps (APIs, ML) need more CPU; memory-intensive apps (caches, JVM) need more memory</td>
+      </tr>
+      <tr>
+        <td>Traffic patterns</td>
+        <td>Bursty traffic needs higher limits relative to requests; steady traffic can have tighter limits</td>
+      </tr>
+      <tr>
+        <td>Startup behaviour</td>
+        <td>JVM/heavy apps spike CPU and memory at boot &mdash; set limits to cover the startup peak</td>
+      </tr>
+      <tr>
+        <td>Number of replicas</td>
+        <td>More replicas = each can have lower resources; fewer replicas = each needs more</td>
+      </tr>
+      <tr>
+        <td>Node capacity</td>
+        <td>Requests must fit on available Nodes; oversized requests cause scheduling failures (Pending Pods)</td>
+      </tr>
+      <tr>
+        <td>Log and temp file volume</td>
+        <td>Applications that write large logs or temp files need adequate <code>ephemeral-storage</code></td>
+      </tr>
+    </table>
+
+    <div class="note">
+      <strong>Common pitfalls:</strong>
+      <ul>
+        <li><strong>No requests set:</strong> Pods are scheduled as best-effort and can be evicted first under resource
+          pressure.</li>
+        <li><strong>Requests too high:</strong> Wastes cluster capacity; Pods may not schedule if Nodes look "full" even
+          though actual usage is low.</li>
+        <li><strong>Limits too low:</strong> Causes OOMKill (memory) or heavy throttling (CPU), leading to slow or
+          crashing Pods.</li>
+        <li><strong>No limits set:</strong> A single runaway container can starve other Pods on the same Node.</li>
+      </ul>
+    </div>
+
+    <div class="tip">
+      Tip: use the Vertical Pod Autoscaler (VPA) in recommendation mode to get data-driven suggestions for requests and
+      limits based on actual usage history.
+    </div>
+
+    <h3>Persistent Volumes and Claims</h3>
+    <p>Pods are ephemeral &mdash; when they restart, all data on disk is lost. Persistent Volumes (PV) and Persistent
+      Volume Claims (PVC) let you attach durable storage that survives Pod restarts.</p>
+
+    <h4>Mounting a PVC in a Deployment</h4>
+    <pre><code>spec:
+  template:
+    spec:
+      containers:
+      - name: my-app
+        volumeMounts:
+        - name: persistent-config
+          mountPath: /opt/config
+      volumes:
+      - name: persistent-config
+        persistentVolumeClaim:
+          claimName: persistent-config-iam-admin-0</code></pre>
+
+    <h4>Creating a PersistentVolumeClaim</h4>
+    <pre><code>apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: persistent-config-iam-admin-0
+  namespace: my-namespace
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: local-path</code></pre>
+
+    <table>
+      <tr>
+        <th>Access Mode</th>
+        <th>Meaning</th>
+      </tr>
+      <tr>
+        <td><code>ReadWriteOnce</code></td>
+        <td>Volume can be mounted as read-write by a single Node</td>
+      </tr>
+      <tr>
+        <td><code>ReadOnlyMany</code></td>
+        <td>Volume can be mounted as read-only by multiple Nodes</td>
+      </tr>
+      <tr>
+        <td><code>ReadWriteMany</code></td>
+        <td>Volume can be mounted as read-write by multiple Nodes</td>
+      </tr>
+    </table>
+
+    <h3>Storage Classes</h3>
+    <p>A <code>StorageClass</code> defines <em>how</em> storage is dynamically provisioned. When a PVC references a
+      StorageClass, Kubernetes automatically creates the underlying volume.</p>
+
+    <h4>How dynamic provisioning works</h4>
+    <ol>
+      <li>A PVC is created with a <code>storageClassName</code>.</li>
+      <li>Kubernetes finds the matching StorageClass.</li>
+      <li>The provisioner defined in the StorageClass creates the actual volume.</li>
+    </ol>
+
+    <pre><code>kubectl get storageclass</code></pre>
+    <p>If no <code>storageClassName</code> is specified in the PVC, Kubernetes uses the cluster's default StorageClass
+      (marked with <code>(default)</code> in the output).</p>
+
+    <h4>Common StorageClass types</h4>
+    <table>
+      <tr>
+        <th>Environment</th>
+        <th>StorageClass</th>
+        <th>Notes</th>
+      </tr>
+      <tr>
+        <td>Local (k3s, k3d)</td>
+        <td><code>local-path</code></td>
+        <td>Stores data on the node's disk. Not for production.</td>
+      </tr>
+      <tr>
+        <td>AWS</td>
+        <td><code>gp2</code>, <code>gp3</code></td>
+        <td>EBS-backed volumes</td>
+      </tr>
+      <tr>
+        <td>Azure</td>
+        <td><code>standard</code>, <code>premium</code></td>
+        <td>Managed disk storage</td>
+      </tr>
+      <tr>
+        <td>GCP</td>
+        <td><code>standard</code>, <code>ssd</code></td>
+        <td>Persistent Disk</td>
+      </tr>
+      <tr>
+        <td>On-prem</td>
+        <td><code>nfs</code>, <code>ceph</code>, <code>longhorn</code></td>
+        <td>Shared or distributed storage</td>
+      </tr>
+    </table>
+
+    <div class="note">
+      <code>hostPath</code> is a local-only volume type for development. It maps a directory on the host into the Pod.
+      Unlike a PVC, it doesn't support dynamic provisioning, replication, or portability.
+    </div>
+
+    <h3>Summary</h3>
+    <table>
+      <tr>
+        <th>Concept</th>
+        <th>Key takeaway</th>
+      </tr>
+      <tr>
+        <td>Recreate strategy</td>
+        <td>Causes downtime; deletes all Pods before creating new ones</td>
+      </tr>
+      <tr>
+        <td>RollingUpdate strategy</td>
+        <td>Zero downtime; gradually replaces Pods (default)</td>
+      </tr>
+      <tr>
+        <td><code>revisionHistoryLimit</code></td>
+        <td>Controls how many old ReplicaSets (rollback versions) are kept</td>
+      </tr>
+      <tr>
+        <td><code>imagePullPolicy</code></td>
+        <td>Controls when images are pulled from the registry</td>
+      </tr>
+      <tr>
+        <td>Liveness probe</td>
+        <td>Restarts the container if the application is dead or stuck</td>
+      </tr>
+      <tr>
+        <td>Readiness probe</td>
+        <td>Removes the Pod from Service endpoints if not ready for traffic</td>
+      </tr>
+      <tr>
+        <td>Startup probe</td>
+        <td>Handles slow-starting apps; disables other probes until success</td>
+      </tr>
+      <tr>
+        <td>Resource requests/limits</td>
+        <td>Controls CPU, memory, and ephemeral-storage allocation per container</td>
+      </tr>
+      <tr>
+        <td>PersistentVolumeClaim</td>
+        <td>Requests durable storage that survives Pod restarts</td>
+      </tr>
+      <tr>
+        <td>StorageClass</td>
+        <td>Defines how storage is dynamically provisioned</td>
+      </tr>
+    </table>
+
+    <h3>Final notes &amp; recommendations</h3>
+    <ul>
+      <li>Always use <code>RollingUpdate</code> strategy in production to avoid downtime. Reserve <code>Recreate</code>
+        for cases where only one version can run at a time.</li>
+      <li>Set both <code>requests</code> and <code>limits</code> for CPU, memory, and ephemeral-storage on every
+        container. Profile actual usage before choosing values.</li>
+      <li>Configure liveness, readiness, and startup probes for all production workloads to enable self-healing and
+        safe traffic routing.</li>
+      <li>Use versioned image tags (e.g., <code>:1.2.3</code>) instead of <code>:latest</code> in production to ensure
+        reproducible deployments.</li>
+    </ul>
+
+</body>
+
+</html>
