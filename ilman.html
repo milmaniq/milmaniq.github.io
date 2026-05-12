@@ -483,6 +483,96 @@ func (s *Dao) GetUsersByTenantPage(ctx, tenantID, page, pageSize) { ... }
 </pre>
 
     <section>
+      <h3>Goroutines, WaitGroups & conc.WaitGroup</h3>
+
+      <ul>
+        <li><strong>Goroutine</strong> — A lightweight thread in Go that runs concurrently.</li>
+        <li><strong>WaitGroup</strong> — A synchronization primitive that lets you wait until a set of goroutines
+          has finished. Each goroutine calls <code>Done()</code> when finished. The main thread calls
+          <code>Wait()</code> to block until all goroutines are done.</li>
+        <li><strong>conc.WaitGroup</strong> — A safer, cleaner replacement for <code>sync.WaitGroup</code>. It
+          tracks goroutines, catches panics, and simplifies concurrency management.</li>
+      </ul>
+
+      <p>
+        💡 Tip: Prefer <code>conc.WaitGroup</code> over <code>sync.WaitGroup</code> for goroutine management
+        in production Go code.
+      </p>
+    </section>
+
+    <section>
+      <h3>Graceful Shutdown of Fx Applications</h3>
+
+      <p>
+        In an Fx application, if a critical service fails to start or encounters a fatal runtime error,
+        the expected behavior is to trigger application shutdown so that other services also stop cleanly.
+      </p>
+
+      <p class="fix">✅ Solution</p>
+      <p>
+        Inject <code>fx.Shutdowner</code> into your function and call it when you encounter an error.
+        Use <code>fx.Shutdowner</code> for graceful shutdown of the entire app.
+      </p>
+
+      <p>
+        💡 Tip: Instead of passing in all those dependencies and rebuilding things like
+        <code>TenantAppConfigurator</code> yourself, you can let Fx construct it once
+        (in <code>fx.Provide</code>) and inject it directly (in <code>fx.Invoke</code>).
+      </p>
+    </section>
+
+    <section>
+      <h3>Lifecycle: Start / Stop with Context</h3>
+
+      <p>
+        A common pattern for managing background goroutines:
+      </p>
+
+      <ol>
+        <li>Store the context cancel function when <code>Start()</code> is called.</li>
+        <li>Call cancel in <code>Stop()</code>.</li>
+        <li>Wait for goroutines to exit using <code>s.waitGroup.Wait()</code>.</li>
+      </ol>
+
+      <p>
+        This guarantees that goroutines exit cleanly when the worker is stopped.
+      </p>
+    </section>
+
+    <section>
+      <h3>Why Prefer <code>Ticker</code> Over <code>time.Sleep</code></h3>
+
+      <p class="problem">❌ Drawback of <code>time.Sleep(30 * time.Second)</code></p>
+      <p>
+        If <code>ctx</code> is canceled during the sleep, the goroutine cannot react immediately.
+      </p>
+
+      <p class="fix">✅ Fix — Use <code>Ticker</code></p>
+      <p>
+        With a <code>Ticker</code>, your loop can immediately stop if <code>ctx.Done()</code> is triggered —
+        no need to “wait out” the sleep duration. Using a Ticker allows you to wait for either the next
+        tick or context cancellation, making it more responsive.
+      </p>
+    </section>
+
+    <section>
+      <h3>Using <code>lo.Difference</code></h3>
+
+      <p>
+        <code>lo.Difference</code> returns the difference between two collections.
+      </p>
+
+      <ul>
+        <li>The first value is the collection of elements absent from <code>list2</code>.</li>
+        <li>The second value is the collection of elements absent from <code>list1</code>.</li>
+      </ul>
+
+      <p>
+        💡 Useful for computing what to add and what to remove when reconciling two slices.
+      </p>
+    </section>
+
+    <section>
       <h3>Comparing Slices as Sets — Avoid Sorting</h3>
 
       <p class="problem">❌ Problem</p>
@@ -951,6 +1041,155 @@ if err := scimSourceState.CanProvision(s.clock.NowUTC()); err != nil {
       </p>
     </section>
 
+    <section>
+      <h3>Test-Driven Development (TDD)</h3>
+
+      <p>
+        TDD stands for <strong>Test-Driven Development</strong>. It's a software development approach where
+        you write tests <em>before</em> writing the actual code. It's widely used in agile and clean code
+        practices.
+      </p>
+
+      <p>
+        💡 When doing TDD, don't test implementation details — instead, test the behaviours.
+      </p>
+
+      <h4>The Trigger to Writing a Test</h4>
+      <ul>
+        <li>❌ The trigger to writing a test in TDD is <em>not</em> adding a method to a class.</li>
+        <li>✅ The trigger to writing a test in TDD is adding a new requirement to the software.</li>
+      </ul>
+
+      <h4>TDD Process — Red → Green → Refactor</h4>
+      <ol>
+        <li><strong>Red:</strong> Write a failing test for a small feature or functionality.</li>
+        <li><strong>Green:</strong> Implement just enough code to make the test pass.</li>
+        <li><strong>Refactor:</strong> Improve the code (cleaner, more efficient) without changing behavior,
+          ensuring tests still pass.</li>
+      </ol>
+
+      <h4>Why TDD is Helpful</h4>
+      <ul>
+        <li>Writing tests first makes you think about behaviour from a user's perspective.</li>
+        <li>Tests give you the confidence to change code without breaking functionality.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h3>Event Storming</h3>
+
+      <p>
+        Event Storming is about exploring the domain and visualizing flows of events, commands, and actors.
+      </p>
+
+      <h4>Core Concepts</h4>
+      <ul>
+        <li><strong>Event</strong> — Represents business facts (something that already happened).
+          <br>Example: <code>OrderPlaced</code>, <code>PaymentConfirmed</code>.</li>
+        <li><strong>Command</strong> — Instruction to perform an action — if successful, it results in one or
+          more events.
+          <br>Example: <code>PlaceOrder</code>, <code>CancelOrder</code>.</li>
+        <li><strong>Policy</strong> — Automatic reaction to a domain event that may issue a new command
+          (business rule/logic).
+          <br>Example: After <code>PaymentFailed</code>, a policy may issue <code>NotifyUser</code>.</li>
+        <li><strong>Aggregate</strong> — A domain object.
+          <br>Example: <code>Order</code>, <code>Cart</code>.</li>
+        <li><strong>User Role</strong> — Actor (person or system) that initiates commands, which may
+          eventually cause events.
+          <br>Example: <code>Customer</code>, <code>Admin</code>, <code>InventoryService</code>.</li>
+        <li><strong>Process</strong> — Listens to an event and decides to issue a new command —
+          orchestrating multi-step workflows.
+          <br>Example: After <code>OrderPlaced</code>, the process triggers <code>ReserveInventory</code>.</li>
+        <li><strong>View</strong> — UI for displaying event data. Often part of CQRS.
+          <br>Example: <code>OrderSummary UI</code>, <code>UserProfile UI</code>.</li>
+        <li><strong>Hot Spot</strong> — Highlights uncertainties, conflicts, or missing info that need to be
+          clarified during modeling.
+          <br>Example: <em>"Who owns payment retry logic?"</em></li>
+      </ul>
+    </section>
+
+    <section>
+      <h3>CQRS — Command Query Responsibility Segregation</h3>
+
+      <p>
+        CQRS stands for <strong>Command Query Responsibility Segregation</strong>. It's an architectural
+        pattern used in software design that separates how you read data (queries) from how you
+        write/update data (commands).
+      </p>
+
+      <p>
+        <strong>CQRS</strong> = separate models for writing (commands) and reading (queries), making systems
+        more scalable, maintainable, and performant.
+      </p>
+    </section>
+
+    <section>
+      <h3>Hexagonal Architecture (Ports &amp; Adapters)</h3>
+
+      <p>
+        Hexagonal Architecture (also called <strong>Ports and Adapters</strong>) is a software architecture
+        pattern about structuring an application so that the core business logic (the "domain") is
+        independent of external technologies like databases, UIs, messaging systems, or APIs.
+      </p>
+
+      <h4>Concepts</h4>
+      <ul>
+        <li><strong>Domain</strong> — Contains business rules, use cases, and domain models.</li>
+        <li><strong>Ports</strong> — Interfaces that define how the domain layer interacts with the outside
+          world.</li>
+        <li><strong>Adapters</strong> — Implementations of those ports for specific technologies.</li>
+      </ul>
+
+      <h4>Example: E-commerce Order Service</h4>
+      <ul>
+        <li><strong>Domain:</strong> <code>OrderService</code> with method <code>placeOrder()</code>
+          (business rules).</li>
+        <li><strong>Inbound Port + Adapter:</strong>
+          <ul>
+            <li>Port: <code>OrderUseCase</code> interface.</li>
+            <li>Adapter: REST controller that translates HTTP request into a <code>placeOrder()</code> call.</li>
+          </ul>
+        </li>
+        <li><strong>Outbound Port + Adapter:</strong>
+          <ul>
+            <li>Port: <code>OrderRepository</code> interface / <code>PaymentGatewayPort</code></li>
+            <li>Adapter: <code>PostgresOrderRepository</code> or <code>MongoOrderRepository</code> /
+              <code>StripePaymentAdapter</code> or <code>PaypalPaymentAdapter</code></li>
+          </ul>
+        </li>
+      </ul>
+
+      <p>
+        The business logic doesn't care whether persistence is Postgres or Mongo, or whether payments are
+        via Stripe or PayPal — it just calls the port.
+      </p>
+
+      <h4>Comparison with Other Architectures</h4>
+
+      <p><strong>1. Layered Architecture (a.k.a. n-tier)</strong></p>
+      <ul>
+        <li>Organizes code in horizontal layers (common in Java/Spring apps).</li>
+        <li>Rules: upper layers can call lower layers, but not the other way around.</li>
+        <li>Cons: business logic can leak into controllers or repositories, so it would be hard to test in
+          isolation.</li>
+      </ul>
+
+      <p><strong>2. Hexagonal Architecture</strong></p>
+      <ul>
+        <li>The domain (<code>serviceImpl</code>) is located at the center, surrounded by ports
+          (interfaces) and adapters (implementations), so the system is independent of frameworks, UIs,
+          or databases.</li>
+        <li>Pros: Testable.</li>
+        <li>Cons: More boilerplate code and similar interfaces.</li>
+      </ul>
+
+      <p><strong>3. Clean Architecture</strong></p>
+      <ul>
+        <li>An evolution of hexagonal — emphasizes dependency rules where inner circles know nothing about
+          outer circles.</li>
+      </ul>
+    </section>
+
 
     <!-- Begin appended content -->
     <section>
@@ -1026,17 +1265,67 @@ chore(release): merge main into release/1.14.0
       </p>
     </section>
 
+    <section>
+      <h3>Code Review in Cursor — Agent Review</h3>
+
+      <p>
+        <strong>Agent Review</strong> performs local code review inside Cursor. It reviews your local
+        changes <em>before</em> you even push.
+      </p>
+
+      <h4>Three Ways to Use It</h4>
+      <ul>
+        <li><strong>Slash command:</strong> Type <code>/agent-review</code> in the agent chat.</li>
+        <li><strong>Automatic:</strong> Enable in <em>Settings → Agents → Agent Review</em> to run after
+          every commit.</li>
+        <li><strong>Source Control tab:</strong> Run Agent Review to compare local changes against your main
+          branch.</li>
+      </ul>
+
+      <p>
+        You can choose <strong>Quick</strong> (fast, low cost) or <strong>Deep</strong> (thorough, higher
+        cost) review depth.
+      </p>
+
+      <h4>Reviewing PRs Targeting Non-Main Branches</h4>
+      <p>
+        Just run the command directly in the chat:
+      </p>
+      <pre>
+Run git diff &lt;target-branch&gt;...HEAD and review the changes for bugs, code quality, and security issues.
+      </pre>
+    </section>
 
     <section>
       <h3>Idempotent Operations</h3>
       <p>
-        <em>Definition:</em> Calling it multiple times gives the same result.
+        <em>Definition:</em> An operation is idempotent if calling it multiple times gives the same result.
       </p>
       <p>
         Example: If an endpoint updates a field (<code>active</code>) in an existing resource (<code>user</code>), use
         <code>PUT</code>.
         <br>It is idempotent — calling it multiple times doesn’t change the result.
       </p>
+
+      <h4>Why <code>PUT</code> Fits Update-Existing-Field Endpoints</h4>
+      <p>
+        If an endpoint's purpose is to update an existing field (e.g., <code>active</code>) in an existing
+        resource (e.g., <code>user</code>):
+      </p>
+      <ul>
+        <li>
+          <strong><code>PUT</code> is used to update or replace</strong> an existing resource or a specific
+          field of it.
+        </li>
+        <li>
+          You already know the user's <code>{id}</code> — so it's not a creation, which would use
+          <code>POST</code>.
+        </li>
+        <li>
+          The operation is <strong>idempotent</strong> — calling it multiple times gives the same result
+          (activating the user again doesn't change anything).
+        </li>
+      </ul>
     </section>
 
     <section>
@@ -1165,7 +1454,37 @@ Encrypted on disk (AES-256)
       </p>
     </section>
 
+    <section>
+      <h3>Dedicated MongoDB Cluster for IAM</h3>
 
+      <p><strong>Question:</strong></p>
+      <p>
+        Why should IAM (Curity) use a dedicated MongoDB cluster instead of a shared cluster?
+      </p>
+
+      <p><strong>Answer:</strong></p>
+      <p>
+        Using a dedicated MongoDB cluster for IAM ensures:
+      </p>
+
+      <ul>
+        <li>Better performance isolation</li>
+        <li>Prevents interference from other applications</li>
+        <li>Higher reliability for a critical central authentication system</li>
+      </ul>
+
+      <p>
+        In a <strong>shared cluster</strong>, MongoDB connection pooling is managed at the cluster level,
+        meaning multiple applications compete for the same connections. This increases the risk of
+        <em>connection exhaustion</em>, which can directly impact Curity. Since IAM is a platform used by
+        all applications, this can lead to a system-wide failure.
+      </p>
+
+      <p>
+        💡 Although a dedicated cluster has higher cost, it significantly reduces these risks and is the
+        safer approach.
+      </p>
+    </section>
 
     <section>
       <h3>Docker & Kubernetes Deployment</h3>
@@ -1232,6 +1551,211 @@ load('/tmp/mongo-create_database.js')
         💡 Tip: This approach is useful for quick manual setup, but for production environments,
         consider automating initialization using init containers, Helm hooks, or migration tools.
       </p>
+    </section>
+
+    <section>
+      <h3>Port-Forwarding into WSL2 — Listening on All Interfaces</h3>
+
+      <p class="problem">❌ Problem</p>
+      <p>
+        Running the Curity patched image, I could not access the admin UI from the Windows browser even
+        after port-forwarding. Why?
+      </p>
+
+      <p class="root-cause">🔎 Root Cause</p>
+      <p>
+        <code>kubectl port-forward</code> binds to <code>127.0.0.1</code> by default, which means it only
+        listens on the loopback interface inside WSL2. It's not reachable from outside the WSL2 VM — not
+        even via the WSL2 IP.
+      </p>
+
+      <p class="fix">✅ Fix — Listen on All Interfaces</p>
+      <pre>
+kubectl port-forward svc/curity-idsvr-admin-svc 6749:6749 \
+  --context k3d-user-management-local -n curity-iam --address 0.0.0.0
+
+kubectl port-forward svc/curity-idsvr-runtime-svc 9443:8443 \
+  --context k3d-user-management-local -n curity-iam --address 0.0.0.0
+      </pre>
+
+      <p>
+        <strong>PS:</strong> The default Curity latest image was reachable without
+        <code>--address 0.0.0.0</code>, but the patched image was not.
+      </p>
+
+      <h4>Get Your WSL2 IP</h4>
+      <pre>
+hostname -I | awk '{print $1}'
+      </pre>
+
+      <p>
+        Then in your Windows browser, visit:
+      </p>
+      <pre>
+https://&lt;WSL2_IP&gt;:6749/admin/
+      </pre>
+    </section>
+
+    <section>
+      <h3>Replica Set Memory Issues — Pod Pending</h3>
+
+      <p class="problem">❌ Symptoms in Pod Events</p>
+      <pre>
+Events:
+  Type     Reason            Age    From               Message
+  ----     ------            ----   ----               -------
+  Warning  FailedScheduling  5m38s  default-scheduler  0/1 nodes are available:
+    1 Insufficient memory. preemption: 0/1 nodes are available:
+    1 No preemption victims found for incoming pod.
+      </pre>
+
+      <p class="fix">✅ Fix</p>
+      <p>
+        Delete the old replica set so the cluster can free up memory and reschedule the new pod.
+      </p>
+    </section>
+
+    <section>
+      <h3>Deciding Resource Limits in Kubernetes</h3>
+
+      <p>
+        When sizing CPU and memory for a Kubernetes workload, account for everything happening inside
+        the pod — not just the application logic.
+      </p>
+
+      <h4>CPU Limits — Things to Consider</h4>
+      <ul>
+        <li>Transformation in API</li>
+        <li>TLS termination</li>
+        <li>Token validation</li>
+        <li>Concurrent requests</li>
+        <li>Encoding</li>
+        <li>Encrypting</li>
+        <li>CI systems (building docker images)</li>
+        <li>API gateways (serialization / deserialization)</li>
+      </ul>
+
+      <h4>Memory Limits — Things to Consider</h4>
+      <ul>
+        <li>Go runtime</li>
+        <li>Goroutines</li>
+        <li>Redis clients</li>
+        <li>HTTP clients</li>
+        <li>JSON buffers</li>
+        <li>Large payloads</li>
+        <li>Concurrent requests</li>
+        <li>Caching</li>
+      </ul>
+    </section>
+
+    <section>
+      <h3>Curity Probe Tuning Under Heavy Config Load</h3>
+
+      <p class="problem">❌ Symptoms</p>
+      <p>
+        <code>TimeoutException</code> / <code>ConnectException</code> / <code>ConfException: unexpected
+          end of file</code> / <code>EOFException</code> / <code>CdbListener - Exception when handling
+          subscription triggers</code> in logs of runtime pod, and the runtime pod goes to <em>Not
+          Ready</em> state.
+      </p>
+
+      <p class="root-cause">🔎 Why?</p>
+      <p>
+        This strongly suggests the admin node wasn't accepting cluster connections from runtime nodes (or
+        was too slow to complete mutex/topology work) during a large config apply. As a result, the
+        runtime nodes can't register themselves with the admin node on port <code>6790</code>. The
+        readiness probes then fail, and the pod goes to <em>Not Ready</em>.
+      </p>
+
+      <p class="fix">✅ Solution — Increase <code>timeoutSeconds</code> and <code>periodSeconds</code></p>
+
+      <ul>
+        <li>
+          <strong>Why increase <code>timeoutSeconds</code> to 30s?</strong> While the admin is applying a
+          huge config (or the runtime is recovering), the JVM can be slow: long GC pauses, threads busy on
+          cluster/config work, etc. The health handler may still be fine but not answer within 10s.
+        </li>
+        <li>
+          <strong>Why increase <code>periodSeconds</code> to 30s?</strong> This sends less probe traffic to
+          the admin node, giving fewer chances per minute to hit a "slow window" and stack up failures.
+        </li>
+      </ul>
+
+      <pre>
+--set curity.admin.livenessProbe.initialDelaySeconds=180 \
+--set curity.admin.livenessProbe.timeoutSeconds=30 \
+--set curity.admin.livenessProbe.periodSeconds=30 \
+--set curity.admin.livenessProbe.failureThreshold=10 \
+--set curity.admin.readinessProbe.initialDelaySeconds=120 \
+--set curity.admin.readinessProbe.timeoutSeconds=30 \
+--set curity.admin.readinessProbe.periodSeconds=30 \
+--set curity.admin.readinessProbe.failureThreshold=10 \
+\
+--set curity.runtime.livenessProbe.initialDelaySeconds=180 \
+--set curity.runtime.livenessProbe.timeoutSeconds=30 \
+--set curity.runtime.livenessProbe.periodSeconds=30 \
+--set curity.runtime.livenessProbe.failureThreshold=10 \
+--set curity.runtime.readinessProbe.initialDelaySeconds=120 \
+--set curity.runtime.readinessProbe.timeoutSeconds=30 \
+--set curity.runtime.readinessProbe.periodSeconds=30 \
+--set curity.runtime.readinessProbe.failureThreshold=10
+      </pre>
+
+      <h4>Short Causal Story</h4>
+      <ul>
+        <li>Large config on admin makes the admin and/or cluster path slow or briefly unavailable
+          (<code>6790</code>).</li>
+        <li>As a result, runtime loses or struggles with its cluster connection to admin.</li>
+        <li>During the same window, the runtime JVM is busy or paused, so the readiness probe sometimes
+          doesn't finish in time, which makes Kubernetes mark the pod as <em>NotReady</em>.</li>
+      </ul>
+
+      <p>
+        The runtime doesn't go <em>NotReady</em> because Kubernetes understands "disconnected from admin";
+        it goes <em>NotReady</em> because the probe fails, and that often happens at the same time as the
+        cluster disconnect due to load, timeouts, and admin instability.
+      </p>
+
+      <h4>How to Prevent This Situation</h4>
+      <ul>
+        <li>Use longer / less aggressive readiness on runtime (and liveness on admin) so slow health during
+          load doesn't flip <em>NotReady</em> / restart admin.</li>
+        <li>Allocate more admin resources, so <code>6790</code> and config apply finish faster — fewer
+          disconnects and less runtime churn.</li>
+      </ul>
+
+      <h4>Liveness vs Readiness</h4>
+      <table border="1" cellpadding="6" cellspacing="0">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Liveness</th>
+            <th>Readiness</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Asks</strong></td>
+            <td>Still healthy enough to run?</td>
+            <td>OK to send traffic?</td>
+          </tr>
+          <tr>
+            <td><strong>On repeated failure</strong></td>
+            <td>Restart container</td>
+            <td>NotReady, drop from Service</td>
+          </tr>
+          <tr>
+            <td><strong>Sender</strong></td>
+            <td>Kubelet on the node</td>
+            <td>Kubelet on the node</td>
+          </tr>
+          <tr>
+            <td><strong>Target</strong></td>
+            <td>Container IP:port</td>
+            <td>Container IP:port</td>
+          </tr>
+        </tbody>
+      </table>
     </section>
 
     <section>
@@ -1542,6 +2066,64 @@ func main() {
           OIDC flow), cleared naturally or via <code>/authentication-session/logout</code>.
         </li>
       </ul>
+    </section>
+
+    <section>
+      <h3>Curity Login &amp; Logout Links</h3>
+
+      <ul>
+        <li>
+          <strong>Login link must contain:</strong> token <code>oauth-authorize</code> endpoint
+          (contains the token profile id), <code>client_id</code>, and <code>redirect_uri</code>.
+        </li>
+        <li>
+          <strong>Logout link must contain:</strong> token <code>oauth-session</code> endpoint
+          (contains the token profile id) and <code>client_id</code>.
+        </li>
+      </ul>
+
+      <p>
+        When a client wants to indicate to the Token Service that a user is logged out, it can call the
+        logout path on the Session endpoint (i.e., the <code>end_session_endpoint</code> in the metadata).
+      </p>
+
+      <p>
+        In the logout request, the client can optionally include the ID token that it received from Curity
+        before. Doing so indicates that Curity should terminate the SSO session that the user has for the
+        client. This implies that potential alternative SSO sessions that the user has established with
+        Curity as a result of other clients that requested authentication will <em>remain valid</em>.
+      </p>
+    </section>
+
+    <section>
+      <h3>Static Client Shadowing a Database Client</h3>
+
+      <p class="problem">❌ Problem</p>
+      <p>
+        I created a static (configuration-backed) client with the same name as my database client, but
+        Curity issued the following warning:
+      </p>
+
+      <pre>
+A configuration backed client with ID: ilman-client exists and is shadowing this database client.
+The configuration backed client has the precedence and this database client will not be usable
+until the ID conflict is solved.
+      </pre>
+
+      <p class="fix">✅ Fix</p>
+      <p>
+        To resolve the conflict and continue using the static client, I did the following:
+      </p>
+      <ul>
+        <li>Disabled database client in the token profile.</li>
+        <li>Removed the authorization manager from the token profile.</li>
+        <li>Deleted the GraphQL endpoint in the token profile.</li>
+      </ul>
+
+      <p>
+        💡 Tip: Configuration-backed clients always take precedence over database-backed clients with the
+        same ID.
+      </p>
     </section>
 
     <section>
@@ -1858,6 +2440,261 @@ kubectl get svc -n &lt;ingress-namespace&gt;</code></pre>
     </section>
 
     <section>
+      <h3>What is gRPC?</h3>
+
+      <p>
+        In <strong>gRPC</strong>, a client application can directly call a method on a server application
+        on a different machine. On the server side, the server implements an interface and runs a gRPC
+        server to handle client calls. On the client side, the client has a <strong>stub</strong>
+        (referred to as just a "client" in some languages) that provides the same methods as the server.
+      </p>
+
+      <p>
+        gRPC uses <strong>Protocol Buffers</strong>. This is a mechanism for serializing structured data —
+        think of it as similar to a Jackson Serializer that serializes Java objects to JSON. Protocol
+        Buffers serialize structured data to <em>bytes</em>. So a proto request and response contains
+        bytes, unlike an HTTP request/response that contains <code>application/json</code>, etc.
+      </p>
+
+      <h4>Why Use gRPC for Internal Service-to-Service Communication?</h4>
+      <p>Pure HTTP/JSON:</p>
+      <ul>
+        <li>Is slower (due to JSON parsing).</li>
+        <li>Doesn't enforce strict types between services.</li>
+        <li>Doesn't support streaming well.</li>
+      </ul>
+      <p>
+        💡 So it is recommended to use gRPC for internal service-to-service communication.
+      </p>
+    </section>
+
+    <section>
+      <h3>Protocol Buffers (protobuf)</h3>
+
+      <p>
+        Protocol Buffers (protobuf) is a way to define structured data — like the shape of a message that
+        two systems want to exchange.
+      </p>
+
+      <p>
+        Think of <code>.proto</code> files like a contract:
+        <em>"This is how a User, Order, or Message should look, no matter what language or system is using
+          it."</em>
+      </p>
+
+      <h4>Workflow</h4>
+      <p>
+        The first step when working with protocol buffers is to define the structure for the data you want
+        to serialize in a <code>.proto</code> file: this is an ordinary text file with a
+        <code>.proto</code> extension.
+      </p>
+
+      <p>
+        Once you've specified your data structures, you use the protocol buffer compiler
+        <code>protoc</code> to generate data access classes in your preferred language(s) from your proto
+        definition. These provide simple accessors for each field, like <code>name()</code> and
+        <code>set_name()</code>, as well as methods to serialize/parse the whole structure to/from raw
+        bytes.
+      </p>
+
+      <h4>Defining a gRPC Service</h4>
+      <p>
+        You define gRPC services in the same proto files, with RPC method parameters and return types
+        specified as protocol buffer messages:
+      </p>
+
+      <pre>
+// The greeter service definition.
+service Greeter {
+  // Sends a greeting
+  rpc SayHello (HelloRequest) returns (HelloReply) {}
+}
+
+// The request message containing the user's name.
+message HelloRequest {
+  string name = 1;
+}
+
+// The response message containing the greetings.
+message HelloReply {
+  string message = 1;
+}
+      </pre>
+
+      <h4>Generating Code with <code>protoc</code></h4>
+      <p>
+        As soon as you update the proto file, save it and run the following command to regenerate gRPC code:
+      </p>
+
+      <pre>
+protoc --go_out=. --go_opt=paths=source_relative \
+       --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+       helloworld/helloworld.proto
+      </pre>
+
+      <p>
+        Running <code>protoc</code> generates:
+      </p>
+      <ul>
+        <li><code>.pb.go</code> file → Code for populating, serializing, and retrieving message types.</li>
+        <li><code>_grpc.pb.go</code> file → Generated client and server code.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h3>Buf — Tooling for Protobuf</h3>
+
+      <p>
+        <strong>Buf</strong> is a tool that helps manage protobuf files — especially in large projects.
+      </p>
+
+      <h4>What Buf Handles</h4>
+      <ul>
+        <li>Code generation (creates <code>.go</code>, <code>.java</code>, etc. from <code>.proto</code>)</li>
+        <li>Validation (ensures <code>.proto</code> files follow rules)</li>
+        <li>Versioning (useful when APIs grow)</li>
+        <li>Linting (style issues)</li>
+      </ul>
+
+      <h4>Generating Code</h4>
+      <p>
+        <code>protoc</code> can be replaced with:
+      </p>
+      <pre>
+buf generate
+      </pre>
+
+      <h4>Prerequisites for Using Buf</h4>
+      <ul>
+        <li><code>buf.gen.yaml</code> containing the <code>protoc-gen-go</code> and
+          <code>protoc-gen-go-grpc</code> plugins</li>
+        <li><code>buf.yaml</code></li>
+        <li>proto files</li>
+      </ul>
+
+      <h4>Example — What <code>buf generate</code> Produces</h4>
+      <p>Given:</p>
+      <pre>
+service Greeter {
+  rpc SayHello (HelloRequest) returns (HelloReply);
+}
+      </pre>
+
+      <p>It generates:</p>
+      <ul>
+        <li>
+          <strong>Message classes</strong> (e.g., <code>HelloRequest</code>, <code>HelloReply</code>) used
+          to define the structure of data exchanged between client and server.
+        </li>
+        <li>
+          <strong>gRPC service interface (server-side):</strong>
+          <pre>
+func (s *MyGreeterServer) SayHello(ctx context.Context, req *HelloRequest) (*HelloReply, error)
+          </pre>
+        </li>
+        <li>
+          <strong>gRPC client method (to call the service):</strong>
+          <pre>
+client.SayHello(context.TODO(), &HelloRequest{Name: "Ilman"})
+          </pre>
+        </li>
+      </ul>
+    </section>
+
+    <section>
+      <h3>gRPC Server &amp; Client Implementation</h3>
+
+      <h4>Server Side</h4>
+      <ul>
+        <li>Implement the server interface (also add a constructor for this service implementation).</li>
+        <li>Create a new gRPC server on a port.</li>
+        <li>Register the gRPC service with this server in order to expose it.</li>
+        <li>Update your <code>appOptions</code> to provide your service implementation
+          (e.g., <code>CustomerServiceImpl</code>) — i.e., add it to <code>fx.Provide</code>.</li>
+      </ul>
+
+      <h4>Client Side</h4>
+      <ul>
+        <li>Create a new connection to the server's port.</li>
+        <li>Create a new client and use it with this connection.</li>
+      </ul>
+
+      <h4>gRPC Channel</h4>
+      <p>
+        A gRPC <strong>channel</strong> provides a connection to a gRPC server on a specified host and
+        port. It is used when creating a client stub. Clients can specify channel arguments to modify
+        gRPC's default behavior, such as switching message compression on or off. A channel has state,
+        including <em>connected</em> and <em>idle</em>.
+      </p>
+
+      <h4>Example Run</h4>
+      <pre>
+ilman@IFSCLIENT-01046:.../ifs-technology-security-nexus_user_management_svc$ go run cmd/user-management/main.go
+gRPC server started on [::]:8080
+
+ilman@IFSCLIENT-01046:.../ifs-technology-security-nexus_user_management_svc$ go run pkg/client/main.go
+2025/07/25 14:43:49 Full name from server: Ilman Iqbal
+      </pre>
+    </section>
+
+    <section>
+      <h3>What is a Mux?</h3>
+
+      <p>
+        <strong>Mux</strong> means <em>multiplexer</em>. A multiplexer is a request router. It decides
+        which handler function should process an incoming HTTP request.
+      </p>
+
+      <p>It looks at things like:</p>
+      <ul>
+        <li>The HTTP path (e.g., <code>/scim/v2/Users</code>)</li>
+        <li>The HTTP method (<code>GET</code>, <code>POST</code>, etc.)</li>
+      </ul>
+
+      <h4>HTTP Mux vs gRPC-Gateway Mux</h4>
+      <ul>
+        <li>An <strong>HTTP mux</strong> routes normal HTTP requests from REST clients to your handlers
+          (like a SCIM server).</li>
+        <li>If you want REST clients to talk to gRPC services, you must use <strong>gRPC-Gateway</strong>,
+          which provides a special <code>runtime.NewServeMux()</code>. This mux translates incoming REST
+          (HTTP/JSON) requests into gRPC calls.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h3>Go Workspaces &amp; Makefiles</h3>
+
+      <h4>What is <code>go.work</code> and <code>go.work.sum</code>?</h4>
+      <ul>
+        <li>The <code>go.work</code> file is used in <strong>Go Workspaces</strong> (introduced in Go
+          1.18+). It allows you to work with multiple Go modules together. You can import code between
+          these modules.</li>
+        <li>The <code>go.work.sum</code> file records the checksums (hashes) of module dependencies,
+          similar to <code>go.sum</code>.</li>
+      </ul>
+
+      <h4>What is a Makefile?</h4>
+      <p>A <strong>Makefile</strong> automates tasks like:</p>
+      <ul>
+        <li>Building your code</li>
+        <li>Running tests</li>
+        <li>Linting</li>
+        <li>Generating code</li>
+        <li>Setting up environments</li>
+      </ul>
+
+      <p>
+        It uses a tool called <code>make</code>, which reads the Makefile and executes tasks (called
+        <em>targets</em>).
+      </p>
+
+      <p>
+        💡 The <code>make</code> tool is Unix-based, so Makefiles won't run directly on Windows
+        <code>cmd</code> or PowerShell. They will run on WSL and Git Bash.
+      </p>
+    </section>
+
+    <section>
       <h3>Zero Trust Principle</h3>
       <p><strong>Zero Trust</strong> means: “Never trust anything — always verify.”</p>
       <p>According to the zero trust principle, every request must be:</p>
@@ -1886,6 +2723,131 @@ kubectl get svc -n &lt;ingress-namespace&gt;</code></pre>
   https://&lt;curity-domain&gt;/&lt;profile-id&gt;/introspect</code></pre>
         </li>
       </ul>
+    </section>
+
+    <section>
+      <h3>Token Validation Flow (<code>ValidateToken</code>)</h3>
+
+      <p>
+        The <code>ValidateToken</code> method first parses the JWT <em>without</em> signature verification
+        to read the <code>iss</code> (issuer) claim. This is necessary to determine which verifier to use,
+        since the service supports multiple token sources.
+      </p>
+
+      <h4>Kubernetes Path</h4>
+      <p>
+        If the token's issuer matches the configured Kubernetes issuer, it verifies the token using the
+        K8s JWKS verifier, which is created at startup using the <code>nga-common</code> library's
+        <code>JwtTokenVerifier</code> and <code>JwkKeySetCache</code>.
+      </p>
+      <p>
+        The <code>nga-common</code> library handles fetching the public keys from the Kubernetes JWKS
+        endpoint, caching them in memory, and periodically refreshing them. On success, it returns the
+        result with <code>IssuerTypeKubernetes</code> and uses the tenant ID from the gRPC header (not
+        from the token itself), since K8s service-account tokens don't carry a <code>tenant_id</code>
+        claim.
+      </p>
+
+      <h4>IdP (Curity) Path</h4>
+      <p>
+        If the issuer is not Kubernetes and the Curity verifier is enabled, it extracts the
+        <code>tenant_id</code> claim from the (still unverified) token. This tenant ID is used to look up
+        or lazily create a tenant-specific JWKS verifier from the <code>TenantVerifierCache</code>, which
+        caches verifier instances per issuer in a <code>sync.Map</code>.
+      </p>
+      <p>
+        The actual cryptographic key caching (JWKS fetching and refresh) is handled internally by the
+        <code>nga-common</code> library's <code>JwkKeySetCache</code>. On successful verification, the
+        tenant ID is taken from the <em>token claim</em> (not the header), and the result is returned
+        with <code>IssuerTypeIdP</code>.
+      </p>
+
+      <h4>Fallback</h4>
+      <p>
+        If neither path is taken (issuer doesn't match K8s and Curity is not enabled), it returns a
+        <code>"no token verifier configured"</code> error.
+      </p>
+    </section>
+
+    <section>
+      <h3>Auth Gateway: Single-Tenant vs Multi-Tenant Configuration</h3>
+
+      <p>
+        If all requests authenticate against a single OAuth client (one IdP, one client ID/secret), a
+        <strong>single-tenant gateway</strong> is sufficient. If different tenants need to authenticate
+        against their own OAuth clients (each with their own IdP endpoints, client IDs, secrets, and
+        redirect URLs), a <strong>multi-tenant gateway</strong> is needed.
+      </p>
+
+      <p>
+        Both modes serve the same purpose — providing a <code>TenantConfig</code> (client ID, client
+        secret, auth URL, token URL, logout URL, redirect URL, and scopes) needed for OAuth flows like
+        authorization code exchange and token refresh. They differ in <em>where this configuration comes
+          from</em>.
+      </p>
+
+      <h4>Single-Tenant Mode</h4>
+      <p>
+        All OAuth configuration (client ID, client secret, auth URL, token URL, logout URL, redirect URL)
+        is provided directly via static config at startup. The <code>SingleTenantConfigProvider</code>
+        simply returns these pre-configured values for every request. There is only one application and
+        one hardcoded tenant ID (<code>"single-tenant"</code>). No caching layer is needed since the
+        config is already in memory.
+      </p>
+
+      <h4>Multi-Tenant Mode</h4>
+      <p>
+        OAuth configuration is dynamic and per-tenant. When a request arrives, the tenant is identified by
+        the incoming host (domain name). The <code>CachedTenantConfigProvider</code> first checks a local
+        cache (backed by a <code>TransactionScope</code>/repository, which uses Redis). On a cache miss,
+        it delegates to the underlying user-management gRPC client, which calls
+        <code>FindTenantByHost</code> on the user-management service.
+      </p>
+      <p>
+        The user-management service returns the tenant's auth URL, token URL, logout URL, and a list of
+        applications (each with their own client ID, client secret name, scopes, and redirect URL). This
+        response is then cached so subsequent requests for the same tenant don't need the gRPC call. The
+        cache also includes request deduplication via <code>sync.Map + WaitGroup</code> to prevent
+        thundering herd when multiple concurrent requests hit a cache miss for the same tenant.
+      </p>
+
+      <p class="note">
+        ⚠️ One nuance worth noting: in multi-tenant mode, the gRPC response carries a
+        <code>ClientSecretName</code> (not the secret itself), while single-tenant mode provides the
+        <code>ClientSecret</code> directly in config. This suggests the actual secret resolution for
+        multi-tenant happens elsewhere (likely from a secrets manager or Kubernetes secret).
+      </p>
+    </section>
+
+    <section>
+      <h3>Using <code>X-Tenant-Id</code> Header for UM Endpoints</h3>
+
+      <p><strong>Question:</strong> Is using the <code>X-Tenant-Id</code> header for UM endpoints OK?</p>
+
+      <p><strong>Answer:</strong></p>
+      <p>
+        The cleanest design is to <em>always include <code>tenant_id</code> in the token</em>, since it
+        keeps tenant context consistent and avoids extra validation logic.
+      </p>
+
+      <p>
+        However, in cases where:
+      </p>
+
+      <ul>
+        <li>The request is made by a <strong>trusted internal service</strong> (e.g., Config Service)</li>
+        <li>The endpoint is <strong>not exposed</strong> to end users</li>
+        <li>It runs within a <strong>controlled environment</strong> (e.g., Kubernetes, mTLS, gateway)</li>
+      </ul>
+
+      <p>
+        Using an <code>X-Tenant-Id</code> header is an acceptable approach.
+      </p>
+
+      <p>
+        ⚠️ This header should still be validated against the calling service identity from the token and
+        <strong>never blindly trusted</strong>.
+      </p>
     </section>
 
     <section>
@@ -2052,6 +3014,89 @@ kubectl get svc -n &lt;ingress-namespace&gt;</code></pre>
         </li>
         <li>Used in: SpiceDB, AuthZed</li>
       </ul>
+    </section>
+
+    <section>
+      <h3>Tenant-Scoped Operations in User Management (UM)</h3>
+
+      <p>The following operations in UM are <strong>all tenant-scoped</strong>:</p>
+      <ul>
+        <li>Request handling</li>
+        <li>JWT validation</li>
+        <li>Mongo queries</li>
+      </ul>
+
+      <h4>Tenant Identification &amp; Filtering</h4>
+      <ul>
+        <li>The <code>Tenant</code> document <code>_id</code> is the tenant identifier.</li>
+        <li>Queries for the <code>User</code> collection always filter on <code>state.tenantid</code>
+          first.</li>
+        <li>The <em>List Groups</em> API filters use <code>state.foreigngroup.tenantid</code>.</li>
+        <li>The <code>ScimSource</code> aggregate carries <code>TenantId</code> and ties provisioning to
+          that tenant when creating users/groups.</li>
+      </ul>
+
+      <h4>How Tenant ID is Propagated</h4>
+      <ul>
+        <li>K8s API → sends tenant ID as the <code>x-tenant-id</code> header.</li>
+        <li>REST APIs → send tenant ID as a claim in the Curity token.</li>
+        <li>gRPC <code>FindTenantByHost</code> from <em>auth-gateway</em> to <em>user-management</em> → only
+          attaches a Bearer token; it does <strong>not</strong> pass the <code>x-tenant-id</code> header.</li>
+        <li>Permission checks → forward the <code>x-tenant-id</code> header on outgoing gRPC AuthZ calls.</li>
+      </ul>
+
+      <h4>SCIM URLs</h4>
+      <ul>
+        <li>SCIM URLs are tenant-scoped — they contain the SCIM source ID in the URL.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h3>Conditions for Syncing an Environment to User Management</h3>
+
+      <p>
+        If any element within the <code>environment</code> array contains the following properties, then
+        it will be synced to user-management:
+      </p>
+
+      <pre>
+"region": "US",
+"tenant.status": "CURITY_CONFIGURED",
+"tenant.lecstatus": "ACTIVE"
+      </pre>
+    </section>
+
+    <section>
+      <h3>When Are Curity Profiles Created From Access Studio?</h3>
+
+      <p>Curity profiles are created from Access Studio when:</p>
+
+      <pre>
+LecTenantStatusActive
+  AND !TenantStatusCurityConfigurationFailed
+  AND !TenantStatusDeprovisioning
+  AND !TenantStatusDeleted
+  AND (
+    environment.Tenant.Capabilities.UserManagement
+    OR Details.ResidencyOption == ResidencyOptionRemote
+  )
+      </pre>
+    </section>
+
+    <section>
+      <h3>When is the Application Link Shown?</h3>
+
+      <p>The application link is shown when:</p>
+
+      <pre>
+!tenant.DomainName.None() && tenant.Capabilities.UserManagement
+      </pre>
+
+      <h4>When is <code>tenant.Capabilities.UserManagement = true</code> Added?</h4>
+      <p>
+        It is added to the tenant when the tenant response that is returned from LEC has the necessary
+        capabilities defined in the <code>configmap</code> to enable user management.
+      </p>
     </section>
 
 </body>
