@@ -2871,6 +2871,285 @@ ilman@IFSCLIENT-01046:.../ifs-technology-security-nexus_user_management_svc$ go 
     </section>
 
     <section>
+      <h3>Line Endings: CRLF vs LF (<code>dos2unix</code>)</h3>
+
+      <p class="problem">❌ Problem</p>
+      <p>
+        Shell scripts (<code>.sh</code>) sometimes need to be converted to Unix style with Unix line
+        endings before they can run on Linux. Why?
+      </p>
+
+      <ul>
+        <li>These scripts probably came from Windows (where lines end in <code>\r\n</code>, aka
+          <strong>CRLF</strong>).</li>
+        <li>Linux expects lines to end in <code>\n</code> (<strong>LF</strong> only).</li>
+      </ul>
+
+      <p class="fix">✅ Fix — Use <code>dos2unix</code></p>
+
+      <pre>
+ilman@IFSCLIENT-01046:.../user_management_svc/dev$ dos2unix setup.sh
+dos2unix: converting file setup.sh to Unix format...
+
+ilman@IFSCLIENT-01046:.../user_management_svc/dev$ cd tools
+
+ilman@IFSCLIENT-01046:.../user_management_svc/dev/tools$ dos2unix *
+dos2unix: converting file commit-msg.sh to Unix format...
+dos2unix: converting file install-go.sh to Unix format...
+dos2unix: converting file pre-commit.sh to Unix format...
+dos2unix: converting file setup-toolchain.sh to Unix format...
+dos2unix: converting file wsl2-setup.sh to Unix format...
+
+ilman@IFSCLIENT-01046:.../user_management_svc$ make setup-dev-env
+      </pre>
+
+      <h4>Related Symptom</h4>
+
+      <p>
+        Running a target that calls a Windows-line-ending script results in:
+      </p>
+
+      <pre>
+ilman@IFSCLIENT-01046:.../user_management_svc$ make buf-generate
+tools/buf_generate.sh
+/usr/bin/env: ‘bash\r’: No such file or directory
+/usr/bin/env: use -[v]S to pass options in shebang lines
+make: *** [Makefile:28: buf-generate] Error 127
+      </pre>
+
+      <p class="fix">✅ Fix</p>
+      <pre>
+ilman@IFSCLIENT-01046:.../user_management_svc$ dos2unix tools/buf_generate.sh
+dos2unix: converting file tools/buf_generate.sh to Unix format...
+
+ilman@IFSCLIENT-01046:.../user_management_svc$ make buf-generate
+tools/buf_generate.sh
+      </pre>
+
+      <p>
+        💡 Tip: The <code>\r</code> in <code>bash\r</code> is the giveaway — it means the script's shebang
+        line still has a Windows line ending.
+      </p>
+    </section>
+
+    <section>
+      <h3>Installing Go on Linux</h3>
+
+      <p>
+        Don't forget to use <code>sudo</code>:
+      </p>
+
+      <pre>
+ilman@IFSCLIENT-01046:/mnt/c/IFS/Tools$ sudo tar -C /usr/local -xzf go1.24.5.linux-amd64.tar.gz
+ilman@IFSCLIENT-01046:/mnt/c/IFS/Tools$ export PATH=$PATH:/usr/local/go/bin
+ilman@IFSCLIENT-01046:/mnt/c/IFS/Tools$ go version
+go version go1.24.5 linux/amd64
+      </pre>
+
+      <p>
+        💡 Add the <code>export PATH=...</code> line to your shell profile (<code>~/.bashrc</code>,
+        <code>~/.zshrc</code>) to make it persistent.
+      </p>
+    </section>
+
+    <section>
+      <h3>Setting Up the Dev Environment (<code>make setup-dev-env</code>)</h3>
+
+      <p>
+        Run the following command <strong>after disconnecting from VPN</strong> in order to download
+        dependencies:
+      </p>
+
+      <pre>
+ilman@IFSCLIENT-01046:.../user_management_svc$ make setup-dev-env
+dev/setup.sh
+WSL2 setup already completed. Skipping wsl2-setup.sh step.
+Installing github.com/bufbuild/buf/cmd/buf@latest
+go: downloading github.com/bufbuild/buf v1.55.1
+go: downloading connectrpc.com/connect v1.18.1
+      </pre>
+
+      <p>
+        ⚠️ VPN can block <code>go get</code> / module downloads from public registries — so disconnect
+        before running setup.
+      </p>
+    </section>
+
+    <section>
+      <h3>Generating Code for a Single Proto File with <code>buf generate</code></h3>
+
+      <p>
+        To generate code only for a newly added proto file (instead of regenerating everything):
+      </p>
+
+      <pre>
+ilman@IFSCLIENT-01046:.../user_management_svc/proto$ buf generate --path api/v1/customer_service.proto
+      </pre>
+
+      <p>
+        💡 The <code>--path</code> flag scopes generation to that specific proto, which is much faster
+        when iterating on a single service.
+      </p>
+    </section>
+
+    <section>
+      <h3>Common Buf / Proto Errors &amp; Fixes</h3>
+
+      <h4>Error: <code>unknown type int</code></h4>
+
+      <pre>
+ilman@IFSCLIENT-01046:.../user_management_svc$ make buf-generate
+tools/buf_generate.sh
+api/v1/customer_service.proto:17:3:field customer.CustomerResponse.id: unknown type int
+      </pre>
+
+      <p class="fix">✅ Fix</p>
+      <p>
+        Protobuf doesn't have a plain <code>int</code> type. Change the field type from <code>int</code>
+        to <code>int32</code> (or <code>int64</code>).
+      </p>
+
+      <h4>Error: Mismatched Generated Package Names</h4>
+
+      <pre>
+found packages v1 (core.pb.go) and customerservice (customer_service.pb.go)
+in C:\IFS\Projects_Nexus\ifs-technology-security-nexus_user_management_svc\pkg\client\api\v1
+package customerservice; expected package v1
+      </pre>
+
+      <p class="root-cause">🔎 Root Cause</p>
+      <p>
+        Two proto files in the same directory generated code with different package names —
+        <code>v1</code> and <code>customerservice</code> — which Go does not allow.
+      </p>
+
+      <p class="fix">✅ Fix</p>
+      <p>
+        Update the <code>go_package</code> option in <code>customer_service.proto</code> so that the
+        generated package name matches the directory:
+      </p>
+
+      <pre>
+// Before
+option go_package = "bitbucket.org/ifs-pd/.../proto/api/v1;customerservice";
+
+// After
+option go_package = "bitbucket.org/ifs-pd/.../proto/api/v1;v1";
+      </pre>
+
+      <p>
+        💡 The part after the <code>;</code> in <code>go_package</code> is the Go package name to use in
+        the generated file. All proto files in the same output directory must share the same Go package
+        name.
+      </p>
+    </section>
+
+    <section>
+      <h3>Common Go Run Errors</h3>
+
+      <h4>Error: <code>package command-line-arguments is not a main package</code></h4>
+
+      <pre>
+ilman@IFSCLIENT-01046:.../user_management_svc$ go run pkg/client/main.go
+package command-line-arguments is not a main package
+      </pre>
+
+      <p class="root-cause">🔎 Root Cause</p>
+      <p>
+        The package name of <code>main.go</code> in the client folder was set to <code>client</code>
+        instead of <code>main</code>. Go requires the entry-point file to declare <code>package
+          main</code> in order to be run with <code>go run</code>.
+      </p>
+
+      <p class="fix">✅ Fix</p>
+      <p>
+        Rename the package of <code>main.go</code> in the client folder from <code>client</code> to
+        <code>main</code>.
+      </p>
+    </section>
+
+    <section>
+      <h3>Adding a Dependency to a Go Project</h3>
+
+      <ol>
+        <li>
+          <strong>Install the dependency:</strong>
+          <pre>
+go get go.mongodb.org/mongo-driver@v1.17.4
+          </pre>
+        </li>
+        <li>
+          <strong>Clean up unused imports and ensure all required dependencies are downloaded:</strong>
+          <pre>
+go mod tidy
+          </pre>
+        </li>
+        <li>
+          <strong>You should then see this in your <code>go.mod</code>:</strong>
+          <pre>
+require (
+    ...
+    go.mongodb.org/mongo-driver v1.17.4
+)
+          </pre>
+        </li>
+      </ol>
+    </section>
+
+    <section>
+      <h3>Running the gRPC Server &amp; Client (Example)</h3>
+
+      <h4>Run the Server</h4>
+      <pre>
+ilman@IFSCLIENT-01046:~/projects/ifs-technology-security-nexus_user_management_svc$ go run cmd/user-management/main.go
+      </pre>
+
+      <h4>Run the Client</h4>
+      <pre>
+ilman@IFSCLIENT-01046:~/projects/ifs-technology-security-nexus_user_management_svc$ go run pkg/client/main.go
+2025/07/30 21:40:56 User created: id:"user-123"  userName:"ilman.iqbal@example.com"  displayName:"Ilman Iqbal"  email:"ilman.iqbal@example.com"  externalId:"aad-object-id-abc123"
+      </pre>
+
+      <h4>Get the IP Address of a WSL Linux Machine</h4>
+      <pre>
+ilman@IFSCLIENT-01046:~/Downloads$ hostname -I
+      </pre>
+    </section>
+
+    <section>
+      <h3>Exposing gRPC as REST with gRPC-Gateway</h3>
+
+      <p>
+        To expose your gRPC service as REST, use <strong>gRPC-Gateway</strong>, which generates a
+        reverse-proxy server that translates HTTP/JSON requests into gRPC requests.
+      </p>
+
+      <pre>
+github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.1
+      </pre>
+
+      <h4>Steps to Expose gRPC as REST</h4>
+      <ol>
+        <li>
+          <strong>Update your <code>.proto</code> file with HTTP annotations.</strong>
+        </li>
+        <li>
+          <strong>Update your <code>buf.gen.yaml</code></strong> to include: <code>go</code>,
+          <code>go-grpc</code>, and <code>grpc-gateway</code>. Then run <code>buf generate</code> to
+          regenerate your Go code with gRPC-Gateway.
+        </li>
+        <li>
+          <strong>Create a gRPC-Gateway handler in Go</strong> (can be named e.g.
+          <code>rest_gateway.go</code>). This handler must call the generated
+          <code>RegisterScimServiceHandlerFromEndpoint</code> method.
+        </li>
+        <li>
+          <strong>Run this handler in your <code>main.go</code> file.</strong>
+        </li>
+      </ol>
+    </section>
+
+    <section>
       <h3>Zero Trust Principle</h3>
       <p><strong>Zero Trust</strong> means: “Never trust anything — always verify.”</p>
       <p>According to the zero trust principle, every request must be:</p>
