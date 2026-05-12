@@ -2358,6 +2358,21 @@ kubectl get svc -n &lt;ingress-namespace&gt;</code></pre>
     </section>
 
     <section>
+      <h3>OpenID Connect (OIDC) — The Protocol</h3>
+      <ul>
+        <li>OpenID Connect (OIDC) is a <strong>protocol</strong> that is used to authenticate users.</li>
+        <li>It is used by OIDC providers — in other words, OIDC providers <em>implement</em> the OIDC
+          protocol.</li>
+        <li>Example of an OIDC provider in Curity: the <strong>OIDC Authenticator</strong>.</li>
+      </ul>
+
+      <p>
+        One OIDC provider delegating authentication to an external OIDC provider — and trusting the tokens
+        issued by that external OIDC provider — is called an <strong>OIDC federation</strong>.
+      </p>
+    </section>
+
+    <section>
       <h3>What is an OpenID Connect (OIDC) provider?</h3>
       <ul>
         <li>An OpenID Connect (OIDC) provider is a service that authenticates users and issues tokens</li>
@@ -2436,6 +2451,167 @@ kubectl get svc -n &lt;ingress-namespace&gt;</code></pre>
             <li>Between Curity ↔ Azure AD: using OpenID Connect, which internally uses OAuth 2.0 flows.</li>
           </ul>
         </li>
+      </ul>
+    </section>
+
+    <section>
+      <h3>What is SCIM?</h3>
+
+      <p>
+        <strong>SCIM</strong> = <em>System for Cross-domain Identity Management</em>.
+        A protocol to <strong>sync users between systems</strong>.
+      </p>
+
+      <h4>Push-Based Provisioning</h4>
+      <p>
+        SCIM is <strong>push-based provisioning</strong>. When a user:
+      </p>
+      <ul>
+        <li>Is created</li>
+        <li>Is updated</li>
+        <li>Is disabled</li>
+        <li>Is removed from a group</li>
+      </ul>
+      <p>
+        …Entra automatically calls the application's SCIM endpoint.
+      </p>
+
+      <h4>Identity Authority</h4>
+      <p>
+        The External IdP becomes the <strong>identity authority</strong> — i.e., the External IdP is
+        considered the source of truth for user identity data.
+      </p>
+
+      <p>
+        Example flow:
+      </p>
+      <ul>
+        <li>User leaves the company → disabled in Entra.</li>
+        <li>SCIM sets <code>active=false</code>.</li>
+        <li>User can no longer log in.</li>
+      </ul>
+
+      <p>
+        💡 So in this setup: <strong>Entra is the identity authority, Curity is the identity broker.</strong>
+      </p>
+    </section>
+
+    <section>
+      <h3>SCIM vs Federated Login Mismatch (arc → bear)</h3>
+
+      <p class="problem">❌ Problem</p>
+      <p>
+        In our setup, SCIM provisioning is performed from our Entra tenant using the existing
+        <strong>arc</strong> users, while user authentication is delegated via Entra federation to an
+        external IdP (<strong>bear</strong>).
+      </p>
+
+      <p>
+        Although authentication happens through bear, the OIDC token consumed by Curity is still issued by
+        <em>our</em> Entra tenant. However, due to federation, Entra may present the user with a different
+        login representation (for example, <code>preferred_username</code> / UPN changes from
+        <code>@arc.com</code> to <code>@bear.com</code>).
+      </p>
+
+      <p>
+        Because SCIM provisioning was not updated to reflect this change, the local database still
+        contains the <code>arc</code> email, while login tokens carry the <code>bear</code> email. Since
+        Curity performs a lookup based on <code>preferred_username</code>, this results in a
+        <strong>mismatch and login failure</strong>.
+      </p>
+
+      <p class="note">
+        ✅ This behavior is <em>correct and secure</em> — Curity must <strong>not</strong> guess or
+        heuristically match users based on mutable attributes like email.
+      </p>
+
+      <p class="root-cause">🔎 Root Cause</p>
+      <p>
+        The core issue is that <code>email</code> / UPN is being used as an <strong>identity key</strong>
+        in a system that allows federated authentication. Once federation is enabled, email and UPN are
+        no longer stable identifiers — they are only <em>login hints</em>.
+      </p>
+      <p>
+        Identity continuity should instead be anchored to <strong>immutable Entra-issued
+          identifiers</strong> such as <code>oid</code> (preferred) or <code>iss + sub</code>.
+      </p>
+
+      <p class="fix">✅ Recommended Fix</p>
+      <ul>
+        <li>Stop using <code>preferred_username</code> as the primary lookup key.</li>
+        <li>Introduce proper <strong>account linking</strong> based on immutable Entra identifiers.</li>
+        <li>Allow login-time linking to reconcile SCIM-provisioned users with federated login identities.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h3>Account Linking vs Lookup</h3>
+
+      <p>
+        <strong>Question:</strong> "If Curity only needs to check that the user exists and pull user info
+        into the auth context, why bother linking accounts?"
+      </p>
+
+      <p>
+        <strong>Short answer:</strong> Lookup solves <em>"who is this right now"</em>; account linking
+        solves <em>"who is this over time and across identity sources."</em>
+      </p>
+
+      <ul>
+        <li><strong>Lookup answers:</strong> Do I know a user with this identifier?</li>
+        <li><strong>Linking answers:</strong> Is this external identity permanently bound to <em>this</em>
+          local user?</li>
+      </ul>
+
+      <h4>The Real Problem Account Linking Solves</h4>
+
+      <p><strong>1. Identifiers are not stable.</strong></p>
+      <p>
+        You rely on something like <code>userone@abc.onmicrosoft.com</code>, but in Entra ID
+        this can change due to:
+      </p>
+      <ul>
+        <li>UPN changes</li>
+        <li>Domain migration</li>
+        <li>Email rename</li>
+        <li>Guest → Member conversion</li>
+        <li>Multi-tenant login</li>
+        <li>Alias changes</li>
+      </ul>
+
+      <p>
+        If you don't link, then tomorrow the same human logs in with a different
+        <code>preferred_username</code>, and your lookup fails with <em>"user not found"</em>. With
+        linking, you bind Entra's <strong>immutable subject</strong> (<code>sub</code>, <code>oid</code>,
+        <code>iss</code>) to your local user once.
+      </p>
+
+      <p><strong>2. Multi-IdP and future expansion.</strong></p>
+      <p>
+        Today, the user can log in via only one IdP (e.g., <code>ILMAN_POC_1</code>). Tomorrow, the user
+        should be able to log in with a new IdP (e.g., <code>ILMAN_POC_2</code>). With linking, you can
+        have <strong>one person, many identity providers, one local account</strong>. Without linking,
+        you are silently building a single-IdP system.
+      </p>
+
+      <p><strong>3. Auditing.</strong></p>
+      <p>
+        Without account linking, there is <strong>no proof of identity binding</strong>.
+      </p>
+
+      <h4>When is Lookup Alone Sufficient?</h4>
+      <p>
+        Lookup-only is acceptable when <em>ALL</em> of the following are true:
+      </p>
+      <ul>
+        <li><strong>Single IdP</strong> — user logs in only via one IdP for a tenant.</li>
+        <li><strong>Stable immutable identifier</strong> — no UPN or domain-name changes to emails in the
+          future.</li>
+        <li><strong>No future federation plans</strong> — e.g., Entra ID does not federate logins to
+          partner Entra.</li>
+        <li><strong>No security/audit requirements</strong> — no need to keep track of users whose
+          accounts are linked to an external identity.</li>
+        <li><strong>Short system lifetime.</strong></li>
       </ul>
     </section>
 
@@ -2817,6 +2993,64 @@ ilman@IFSCLIENT-01046:.../ifs-technology-security-nexus_user_management_svc$ go 
         <code>ClientSecret</code> directly in config. This suggests the actual secret resolution for
         multi-tenant happens elsewhere (likely from a secrets manager or Kubernetes secret).
       </p>
+    </section>
+
+    <section>
+      <h3>Why the Auth Gateway is Deployed as a Sidecar</h3>
+
+      <p>
+        Why the <em>auth-gateway</em> is deployed as a sidecar — and <strong>not</strong> as a separate
+        service or a library.
+      </p>
+
+      <h4>What the Auth Gateway Does (Quick Recap)</h4>
+      <p>
+        The auth-gateway:
+      </p>
+      <ul>
+        <li>Handles OAuth 2.0 login / callback / logout flows.</li>
+        <li>Manages user sessions in Redis.</li>
+        <li>Acts as a reverse proxy that injects <code>Authorization: Bearer &lt;token&gt;</code> headers
+          into requests before forwarding them to the actual backend service.</li>
+      </ul>
+
+      <h4>Why NOT a Shared / Centralized Service?</h4>
+      <ol>
+        <li>
+          <strong>Single point of failure</strong> — if the centralized auth service goes down, every
+          backend behind it becomes unreachable. With a sidecar, if one pod's auth-gateway has issues,
+          only that pod is affected.
+        </li>
+        <li>
+          <strong>Extra network hop + latency</strong> — every request would travel:
+          <code>Ingress → Auth Service → Backend</code>. With a sidecar, the auth-gateway and the backend
+          communicate over <code>localhost</code>.
+        </li>
+        <li>
+          <strong>Tight coupling to backend lifecycle</strong> — the auth-gateway needs to be colocated
+          with its backend because it proxies to <code>http://localhost:8082</code> (the backend's HTTP
+          port) using <code>PROXY_ROUTES</code>.
+        </li>
+        <li>
+          <strong>Per-application configuration</strong> — each backend has its own
+          <code>PROXY_ROUTES</code>, <code>BYPASS_HEADERS</code>, <code>BYPASS_PATHS</code>, and
+          <code>APPLICATION_ID</code>.
+        </li>
+      </ol>
+
+      <h4>Why NOT a Library?</h4>
+      <ol>
+        <li>
+          <strong>Language independence</strong> — the auth-gateway is written in Go, but the backends it
+          protects could be in any language. A library would force every team to use Go or maintain ports
+          in every language.
+        </li>
+        <li>
+          <strong>Independent release cycle</strong> — a sidecar can be upgraded independently without
+          recompiling or redeploying the backend application. A library upgrade requires the backend team
+          to update the dependency, rebuild, and redeploy.
+        </li>
+      </ol>
     </section>
 
     <section>
