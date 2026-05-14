@@ -188,17 +188,28 @@ helm repo add curity https://curityio.github.io/idsvr-helm/
 </code></pre>
         <p>
             This registers the Curity chart repo so you can install charts from it.
+            The name <code>curity</code> in the above command is the local <strong>repo alias</strong> you choose
+            for this chart repository — it's how you'll refer to it later (e.g. <code>curity/idsvr</code> when
+            installing). You can list these aliases at any time with <code>helm repo list</code>.
+        </p>
+        <p>
+            Note: you do <em>not</em> select a Kubernetes namespace for this command. <code>helm repo add</code>
+            only stores repo metadata locally on your machine — it does not interact with the cluster yet. A
+            namespace is needed only when you install charts, upgrade releases, or list releases in a namespace.
         </p>
 
         <p><strong>2. Verify repositories</strong></p>
         <pre><code>helm repo list
 </code></pre>
         <pre><code># Output
-NAME    URL
-curity  https://curityio.github.io/idsvr-helm/
+NAME            URL
+curity          https://curityio.github.io/idsvr-helm/
+ingress-nginx   https://kubernetes.github.io/ingress-nginx
+kyverno         https://kyverno.github.io/kyverno/
 </code></pre>
         <p>
-            Now Helm knows about the <code>curity</code> repository.
+            Now Helm knows about the <code>curity</code> repository (along with any other repos you may have
+            added previously, such as <code>ingress-nginx</code> or <code>kyverno</code>).
         </p>
 
         <p><strong>3. Search for charts inside the repo</strong></p>
@@ -291,7 +302,139 @@ kubectl port-forward svc/idsvr-tutorial-runtime-svc 9443:8443 -n curity
             configuration values, without reinstalling from scratch.
         </p>
 
-        <p><strong>9. Uninstall the release</strong></p>
+        <p><strong>9. Upgrade to a newer chart version</strong></p>
+        <p>
+            Over time, the chart maintainers publish new chart versions (bug fixes, new app versions, or new
+            features). Helm makes it easy to roll out a newer chart version while keeping the same release name.
+        </p>
+
+        <p><strong>9.1 Refresh chart repository metadata</strong></p>
+        <p>
+            Before upgrading, refresh your local copy of the repo so Helm knows about the latest available charts:
+        </p>
+        <pre><code>helm repo update curity
+</code></pre>
+        <pre><code># Output
+Hang tight while we grab the latest from your chart repositories...
+...Successfully got an update from the "curity" chart repository
+Update Complete. ⎈Happy Helming!⎈
+</code></pre>
+        <p>
+            Running <code>helm repo update</code> without a repo name refreshes <em>all</em> configured
+            repositories at once.
+        </p>
+
+        <p><strong>9.2 Check what is currently installed</strong></p>
+        <pre><code>helm list -n curity
+</code></pre>
+        <pre><code># Output
+NAME            NAMESPACE   REVISION   UPDATED                       STATUS    CHART           APP VERSION
+idsvr-tutorial  curity      1          2026-04-18 12:13:58 +0530     deployed  idsvr-0.13.17   10.7
+</code></pre>
+        <p>
+            The <code>CHART</code> column shows the chart version currently deployed (<code>idsvr-0.13.17</code>)
+            and <code>APP VERSION</code> shows the underlying app version (<code>10.7</code>). The release name
+            <code>idsvr-tutorial</code> is the running instance of the chart — you'll reuse it in the upgrade
+            command.
+        </p>
+
+        <p><strong>9.3 List all available chart versions</strong></p>
+        <p>
+            After refreshing the repo, you can confirm that newer versions are available:
+        </p>
+        <pre><code>helm search repo curity
+</code></pre>
+        <pre><code># Output
+NAME            CHART VERSION   APP VERSION   DESCRIPTION
+curity/idsvr    0.13.20         11.2          A Helm chart for Curity Identity Server
+</code></pre>
+        <p>
+            By default, <code>helm search repo</code> shows only the latest chart version. To see <em>every</em>
+            published version, use <code>--versions</code>:
+        </p>
+        <pre><code>helm search repo curity/idsvr --versions
+</code></pre>
+        <pre><code># Output
+NAME            CHART VERSION   APP VERSION   DESCRIPTION
+curity/idsvr    0.13.20         11.2          A Helm chart for Curity Identity Server
+curity/idsvr    0.13.19         11.1          A Helm chart for Curity Identity Server
+curity/idsvr    0.13.18         11            A Helm chart for Curity Identity Server
+curity/idsvr    0.13.17         10.7          A Helm chart for Curity Identity Server
+</code></pre>
+        <p>
+            This lets you pick a specific target chart version rather than always jumping to the latest.
+        </p>
+
+        <p><strong>9.4 Inspect default values for a specific chart version</strong></p>
+        <p>
+            Each chart version may ship with different defaults (image tag, replica count, etc.). Inspect them
+            before upgrading so you know what you're getting:
+        </p>
+        <pre><code>helm show values curity/idsvr --version 0.13.19
+</code></pre>
+        <pre><code># Output (truncated)
+# Default values for curity.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+revisionHistoryLimit: 10
+
+# Additional annotations of the ServiceAccount.
+serviceAccountAnnotations: {}
+
+image:
+  repository: curity.azurecr.io/curity/idsvr
+  tag: 11.1
+  pullPolicy: IfNotPresent
+  pullSecret:
+</code></pre>
+        <p>
+            Notice that the image tag (<code>11.1</code>) is set inside the chart itself — the chart already
+            pairs the correct app image with each chart version. So you usually don't need to override
+            <code>image.tag</code> during the upgrade.
+        </p>
+
+        <p><strong>9.5 Upgrade the release to the new chart version</strong></p>
+        <pre><code>helm upgrade idsvr-tutorial curity/idsvr \
+  --version 0.13.19 \
+  --namespace curity \
+  --set curity.admin.logging.level=INFO \
+  --set curity.runtime.logging.level=INFO \
+  --set curity.config.password=12345678 \
+  --set curity.config.uiEnabled=true \
+  --timeout 30m
+</code></pre>
+        <p>
+            - <code>idsvr-tutorial</code>: the existing release (running instance of the chart) you want to
+            upgrade. <br>
+            - <code>--version 0.13.19</code>: pins the chart version to upgrade to. If omitted, Helm picks the
+            latest available version. <br>
+            - Notice we do <strong>not</strong> set <code>image.tag</code> — the chart already references the
+            right image tag (<code>11.1</code>) for this chart version, so let the chart's default take effect.
+            <br>
+            - The <code>--set</code> flags re-apply your custom configuration; any values not passed in fall
+            back to the chart defaults.
+        </p>
+        <p>
+            After the upgrade completes, running <code>helm list -n curity</code> again will show the new chart
+            version (<code>idsvr-0.13.19</code>), the new app version (<code>11.1</code>), and a bumped revision
+            number:
+        </p>
+        <pre><code>helm list -n curity
+</code></pre>
+        <pre><code># Output
+NAME            NAMESPACE   REVISION   UPDATED                       STATUS     CHART           APP VERSION
+idsvr-tutorial  curity      2          2026-05-14 15:49:40 +0530     deployed   idsvr-0.13.19   11.1
+</code></pre>
+        <p>
+            The <code>REVISION</code> count increases by one with every <code>helm upgrade</code> (so it will
+            grow further if you run additional config-only upgrades from step 8). You can review the history of
+            all revisions with <code>helm history idsvr-tutorial -n curity</code>, and roll back to any previous
+            revision using <code>helm rollback idsvr-tutorial &lt;revision&gt; -n curity</code>.
+        </p>
+
+        <p><strong>10. Uninstall the release</strong></p>
         <pre><code>helm delete idsvr-tutorial -n curity
 </code></pre>
         <p>
