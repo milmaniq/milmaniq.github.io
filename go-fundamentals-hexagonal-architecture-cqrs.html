@@ -1,0 +1,1904 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description"
+        content="A complete, beginner-friendly guide to Go: language fundamentals (variables, slices, maps, goroutines, channels, mutexes, context) followed by building a real product-management microservice with hexagonal architecture, CQRS, interfaces, and uber/fx for dependency injection." />
+    <meta name="keywords"
+        content="Go, Golang, Goroutines, Channels, Mutex, RWMutex, Context, Hexagonal Architecture, Ports and Adapters, CQRS, Interfaces, Dependency Injection, uber/fx, fx.Provide, fx.Invoke, gin, zerolog, uuid, microservice, beginner Go tutorial" />
+    <meta name="author" content="Ilman Iqbal" />
+    <title>Go Fundamentals + Building a Microservice with Hexagonal Architecture, CQRS and uber/fx</title>
+    <script type="application/ld+json">
+        {
+            "@context": "https://schema.org",
+            "@type": "Article",
+            "headline": "Go Fundamentals + Building a Microservice with Hexagonal Architecture, CQRS and uber/fx",
+            "author": {
+                "@type": "Person",
+                "name": "Ilman Iqbal",
+                "url": "https://www.linkedin.com/in/ilman-iqbal-096308172"
+            },
+            "publisher": {
+                "@type": "Organization",
+                "name": "Ilman Iqbal",
+                "url": "https://ilmaniqbal.com",
+                "logo": {
+                    "@type": "ImageObject",
+                    "url": "https://ilmaniqbal.com/img/logo.png"
+                }
+            },
+            "datePublished": "2026-05-16",
+            "dateModified": "2026-05-16",
+            "description": "A two-part Go tutorial: Part 1 covers all the Go fundamentals (packages, modules, slices, maps, goroutines, channels, sync, context, http), and Part 2 walks through building a product-management microservice using hexagonal architecture, CQRS, interfaces, gin, zerolog, uuid, and uber/fx for dependency injection.",
+            "keywords": "Go, Golang, Hexagonal Architecture, Ports and Adapters, CQRS, uber/fx, fx.Provide, fx.Invoke, gin, zerolog, uuid, goroutines, channels, mutex, context, dependency injection, beginner Go tutorial",
+            "mainEntityOfPage": {
+                "@type": "WebPage",
+                "@id": "https://ilmaniqbal.com/go-fundamentals-hexagonal-architecture-cqrs.html"
+            }
+        }
+    </script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Source+Sans+Pro&display=swap" rel="stylesheet" />
+    <link href="css/bootstrap.min.css" rel="stylesheet">
+    <link href="css/blog.css" rel="stylesheet">
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-8PPCHX9PDV"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag() { dataLayer.push(arguments); }
+        gtag('js', new Date());
+        gtag('config', 'G-8PPCHX9PDV');
+    </script>
+</head>
+
+<body>
+    <div class="container">
+        <header class="site-header">
+            <a href="index.html" class="site-logo-wrapper" style="text-decoration: none; color: inherit;">
+                <div class="site-logo"><i class="fas fa-code fa-2x"></i></div>
+                <h1>Ilman Iqbal's Blog</h1>
+            </a>
+        </header>
+
+        <h2 class="tm-post-title">Go Fundamentals + Building a Microservice with Hexagonal Architecture, CQRS and
+            uber/fx</h2>
+        <p class="meta">May 16, 2026 posted by Ilman Iqbal</p>
+
+        <p>
+            This article is split into two parts so you can use it as either a reference or a hands-on tutorial.
+            <strong>Part 1</strong> is a tour of Go's language fundamentals - everything from <code>:=</code> to
+            goroutines and <code>context.Context</code>. <strong>Part 2</strong> takes those building blocks and walks
+            you through creating a small <code>product-management</code> microservice using
+            <strong>hexagonal architecture</strong>, <strong>CQRS</strong>, <strong>interfaces</strong>,
+            <code>gin</code>, <code>zerolog</code>, <code>google/uuid</code>, and <code>uber/fx</code> for
+            dependency injection.
+        </p>
+
+        <p>
+            By the end you will understand both the <em>what</em> (Go syntax and stdlib) and the <em>why</em>
+            (how to structure a Go service so its core business logic stays independent of the web framework, the
+            database, the logger, or any other infrastructure choice).
+        </p>
+
+        <hr />
+
+        <h2>Part 1 - Go Fundamentals</h2>
+
+        <h3>Why Go?</h3>
+        <ul>
+            <li><strong>Simplicity</strong> - small language spec, minimal keywords.</li>
+            <li><strong>Speed</strong> - compiled directly to native machine code.</li>
+            <li><strong>Concurrency</strong> - lightweight <em>goroutines</em>, far cheaper than OS threads.</li>
+        </ul>
+
+        <h3>What you need to start</h3>
+        <ul>
+            <li>The Go compiler installed locally (gives you the <code>go</code> command).</li>
+            <li>VS Code (or any editor) with a Go plugin.</li>
+        </ul>
+
+        <h3>Useful <code>go</code> commands</h3>
+        <ul>
+            <li><code>go mod init</code> - initialises a new module (creates <code>go.mod</code>).</li>
+            <li><code>go get</code> - adds or updates a dependency.<br />
+                Example: <code>go get github.com/sirupsen/logrus@v1.10.0</code></li>
+            <li><code>go mod download</code> - downloads everything listed in <code>go.mod</code> into the module cache
+                (<code>$GOPATH/pkg/mod</code>) without changing <code>go.mod</code> or <code>go.sum</code>. It verifies
+                downloads against <code>go.sum</code> and fails on a checksum mismatch.</li>
+            <li><code>go mod tidy</code> - synchronises module files with your code:
+                <ul>
+                    <li>adds dependencies imported in code but missing from <code>go.mod</code>;</li>
+                    <li>removes dependencies in <code>go.mod</code> that the code no longer uses;</li>
+                    <li>updates <code>go.sum</code> checksums accordingly;</li>
+                    <li>downloads anything missing from the module cache.</li>
+                </ul>
+            </li>
+            <li><code>go build</code> - compiles your code into an executable named after the folder
+                (or use <code>-o</code> to choose).</li>
+            <li><code>go run main.go</code> - compiles AND runs immediately (no binary kept around).</li>
+            <li><code>go test ./...</code> - runs every <code>*_test.go</code> in the module.<br />
+                <code>go test -v</code> = verbose, <code>go test -cover</code> = coverage.
+            </li>
+            <li><code>go env</code> - shows Go env vars (<code>GOPATH</code>, <code>GOROOT</code>, etc.).</li>
+            <li><code>go list -m all</code> - lists every module the project depends on.</li>
+        </ul>
+
+        <h3>Go executables</h3>
+        <p>
+            <code>go build</code> on Windows produces <code>app.exe</code>; on macOS / Linux it produces an
+            extension-less binary like <code>./app</code>. The binary is self-contained - it can be shipped to a machine
+            that doesn't even have Go installed.
+        </p>
+
+        <h3>Packages and modules</h3>
+        <ul>
+            <li>Every file in a directory must use the same package name.</li>
+            <li>The <code>main</code> package is special: it defines the program's entry point and must contain
+                <code>func main()</code>.
+            </li>
+            <li>You can't have two <code>main</code> functions in the same package.</li>
+            <li>A <strong>module</strong> is a collection of related packages with a <code>go.mod</code> file at its
+                root.</li>
+        </ul>
+
+        <pre><code>// go.mod
+module myapp
+
+go 1.20
+
+require github.com/sirupsen/logrus v1.10.0
+</code></pre>
+
+        <h3><code>go.mod</code> vs <code>go.sum</code></h3>
+        <ul>
+            <li><code>go.mod</code> - contains which versions of dependencies your module uses (similar to
+                <code>pom.xml</code> in Maven projects).
+            </li>
+            <li><code>go.sum</code> - contains checksums for all dependencies listed in <code>go.mod</code>.
+                A <strong>checksum</strong> is a hash of a file or data that ensures data integrity; in Go modules,
+                it verifies that downloaded dependencies haven't been tampered with.</li>
+        </ul>
+
+        <h3>The <code>init()</code> function</h3>
+        <p>Runs automatically before <code>main()</code>; useful for one-off setup.</p>
+        <pre><code>func init() {
+    fmt.Println("initialized")
+}
+</code></pre>
+
+        <h3>Variables, constants, and <code>:=</code></h3>
+        <pre><code>var a int = 10
+var b = 20            // type inferred
+c := 30               // short declaration, only inside functions
+const pi = 3.14
+const MAX int = 100
+
+var investmentAmount, years float64 = 1000, 10
+var x, name = 1000, "ten" // multiple inferred types in one line
+</code></pre>
+
+        <h3>Zero values</h3>
+        <p>Every uninitialised variable gets a default zero value:</p>
+        <ul>
+            <li><code>int</code> -> <code>0</code></li>
+            <li><code>float</code> -> <code>0.0</code></li>
+            <li><code>bool</code> -> <code>false</code></li>
+            <li><code>string</code> -> <code>""</code></li>
+            <li><code>pointer</code>, <code>slice</code>, <code>map</code> -> <code>nil</code></li>
+        </ul>
+
+        <h3>Reading user input</h3>
+        <pre><code>var amount float64
+fmt.Print("Investment Amount: ")
+fmt.Scan(&amp;amount) // & passes a pointer so Scan can write into 'amount'
+</code></pre>
+
+        <h3>Formatted output</h3>
+        <pre><code>fmt.Println("Hello", "World")            // Hello World\n
+fmt.Printf("%s is %d years old\n", n, a) // Alice is 25 years old
+msg := fmt.Sprintf("%s is %d", n, a)     // returns formatted string
+</code></pre>
+
+        <h3>Variable scopes</h3>
+        <ul>
+            <li>Variables / constants declared inside a function are only visible inside that function.</li>
+            <li>Those declared at file level are visible to every function in the same file (and, when capitalised,
+                to other packages too).</li>
+        </ul>
+
+        <h3>Loops</h3>
+        <p>Go has only <code>for</code> - no <code>while</code>.</p>
+        <pre><code>// classic for
+for i := 0; i &lt; 2; i++ { /* ... */ }
+
+// "while"
+for someBool { /* ... */ }
+
+// infinite loop
+for { /* ... */ }
+</code></pre>
+        <ul>
+            <li><code>break</code> exits the loop.</li>
+            <li><code>continue</code> jumps to the next iteration.</li>
+        </ul>
+
+        <h3><code>switch</code></h3>
+        <p>You don't need <code>break</code> between cases - only one case ever runs. Note: <code>break</code>
+            inside a <code>switch</code> only exits the switch, <strong>not</strong> any enclosing loop. Use an
+            <code>if</code> if you need to break out of a loop from inside a switch.
+        </p>
+
+        <h3>Errors instead of exceptions</h3>
+        <p>Go avoids exceptions. Functions that can fail return an extra <code>error</code> value:</p>
+        <pre><code>import "errors"
+
+func getBalanceFromFile() (string, error) {
+    data, err := os.ReadFile("balance.txt")
+    if err != nil {
+        return "", errors.New("failed to find balance file")
+    }
+    return string(data), nil
+}
+</code></pre>
+
+        <h3><code>range</code></h3>
+        <pre><code>for i, v := range slice  { /* ... */ }
+for k, v := range mapVar { /* ... */ }
+for i, r := range "hello" { /* r is a rune */ }
+</code></pre>
+
+        <h3>The blank identifier <code>_</code></h3>
+        <p>Used to ignore values you don't need:</p>
+        <pre><code>_, err := someFunc()
+</code></pre>
+
+        <h3>Pointers</h3>
+        <pre><code>age := 32
+agePtr := &amp;age      // type: *int
+fmt.Println(*agePtr) // 32   - dereference to read
+*agePtr = 20         // write through the pointer
+</code></pre>
+        <p>Pointers avoid copying large structs when passing them as arguments.</p>
+
+        <h3>Arrays vs slices</h3>
+        <table class="table" style="max-width:600px;">
+            <thead>
+                <tr>
+                    <th>Feature</th>
+                    <th>Array</th>
+                    <th>Slice</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Size</td>
+                    <td>Fixed</td>
+                    <td>Dynamic</td>
+                </tr>
+                <tr>
+                    <td>Type</td>
+                    <td><code>[5]int</code></td>
+                    <td><code>[]int</code></td>
+                </tr>
+            </tbody>
+        </table>
+        <pre><code>arr := [3]int{1, 2, 3} // type [3]int
+sli := []int{1, 2, 3}  // type []int
+</code></pre>
+        <p>
+            When loading data from a database you can't know the count upfront, so you almost always use slices.
+            Internally a slice is backed by an array; when you append past its capacity, Go allocates a new (larger)
+            array and copies into it.
+        </p>
+
+        <h3>Structs and methods</h3>
+        <pre><code>package main
+
+import "fmt"
+
+type User struct {
+    firstName string
+    lastName  string
+}
+
+// Constructor convention: NewUser to be exportable, newUser for package-private.
+func newUser(firstName, lastName string) User {
+    return User{firstName, lastName}
+}
+
+// "(u User)" is a value receiver - the method gets a COPY.
+func (u User) outputUserDetails() {
+    fmt.Println(u.firstName, u.lastName)
+}
+
+// "(u *User)" is a pointer receiver - the method can MUTATE the original.
+func (u *User) clearFirstName() { u.firstName = "" }
+
+func main() {
+    appUser := User{firstName: "Ilman", lastName: "Iqbal"}
+    appUser.outputUserDetails() // prints original
+    appUser.clearFirstName()    // mutates original
+    appUser.outputUserDetails() // first name is empty now
+}
+</code></pre>
+
+        <h3>Map vs struct</h3>
+        <p>
+            Structs have a fixed set of fields known at compile time. Maps have arbitrary keys you can add at
+            runtime.
+        </p>
+        <pre><code>m := make(map[string]int)
+m["a"] = 1
+
+websites := map[string]string{
+    "Google": "https://google.com",
+    "AWS":    "https://aws.com",
+}
+fmt.Println(websites["Google"])
+websites["Linkedin"] = "https://linkedin.com"
+delete(websites, "Google")
+</code></pre>
+        <div class="tip">
+            <p>
+                <strong>Note:</strong> built-in maps are <em>not</em> safe for concurrent use. For shared maps
+                between goroutines use <code>sync.Mutex</code> / <code>sync.RWMutex</code> or <code>sync.Map</code>.
+            </p>
+        </div>
+
+        <h3>Basic data types</h3>
+        <ul>
+            <li><code>int</code>, <code>int32</code>, <code>int64</code></li>
+            <li><code>float32</code>, <code>float64</code></li>
+            <li><code>string</code>, <code>bool</code></li>
+            <li><code>byte</code> -> alias for <code>uint8</code> (raw 8-bit)</li>
+            <li><code>rune</code> -> alias for <code>int32</code> (a Unicode code point)</li>
+        </ul>
+
+        <h3><code>byte</code> vs <code>rune</code> (a critical difference)</h3>
+        <pre><code>var word string = "Toñito"
+
+for _, r := range word {
+    fmt.Printf("rune: %v, string: %s\n", r, string(r))
+}
+fmt.Println("len(word):",          len(word))         // 7 - bytes
+fmt.Println("len([]rune(word)):",  len([]rune(word))) // 6 - runes
+</code></pre>
+        <p>
+            Use <code>rune</code> when working with Unicode text, counting characters, validating input, or
+            processing user-entered text.
+        </p>
+        <pre><code>import "unicode"
+
+for _, r := range s {
+    if unicode.IsDigit(r) {
+        fmt.Println("Digit")
+    }
+}
+</code></pre>
+
+        <h3><code>make</code> vs <code>new</code></h3>
+        <ul>
+            <li><code>new</code> - allocates and returns a <em>pointer</em> to a zero value.</li>
+            <li><code>make</code> - initialises a slice, map, or channel (cannot be used for arrays).</li>
+        </ul>
+        <pre><code>p := new(int)         // *int, pointing at 0
+s := make([]int, 5)   // []int{0,0,0,0,0}
+</code></pre>
+
+        <h4>Slice variations</h4>
+        <pre><code>make([]int, 0, 10) // empty, capacity 10 - good when you'll append a known max
+make([]int, 0)     // empty, no capacity hint
+make([]int, 10)    // ten zero values - good when you'll assign by index
+</code></pre>
+
+        <h4>Map variations</h4>
+        <pre><code>make(map[int]bool)    // empty, no size hint
+make(map[int]bool, 5) // empty, capacity HINT 5 (perf, not a fixed limit)
+</code></pre>
+
+        <h4>Channel variations</h4>
+        <pre><code>make(chan int)    // unbuffered. Send blocks until a receiver is ready.
+make(chan int, 2) // buffered, capacity 2. Send blocks only when buffer is full.
+</code></pre>
+
+        <h3>Functions</h3>
+        <pre><code>func add(a, b int) int { return a + b }
+
+// multiple return values - extremely common with errors
+func divide(a, b int) (int, error) {
+    if b == 0 {
+        return 0, errors.New("division by zero")
+    }
+    return a / b, nil
+}
+</code></pre>
+
+        <h3><code>defer</code>, <code>panic</code>, and <code>recover</code></h3>
+        <ul>
+            <li><code>defer</code> - executes the call when the surrounding function returns. LIFO order.</li>
+            <li><code>panic</code> - aborts the normal flow and starts unwinding.</li>
+            <li><code>recover</code> - regains control of a panicking goroutine; only works inside a deferred
+                function.</li>
+        </ul>
+        <pre><code>func processRequest() {
+    defer fmt.Println("Cleanup: closing DB connection")
+
+    defer func() {
+        if r := recover(); r != nil {
+            fmt.Println("Recovered from panic:", r)
+        }
+    }()
+
+    fmt.Println("Processing request...")
+    panic("database connection lost")
+    fmt.Println("Never executes")
+}
+
+func main() {
+    processRequest()
+    fmt.Println("Service continues running")
+}
+/* Output:
+Processing request...
+Recovered from panic: database connection lost
+Cleanup: closing DB connection
+Service continues running
+*/
+</code></pre>
+
+        <h3>Goroutines vs threads</h3>
+        <ul>
+            <li>Goroutines start with a tiny ~2KB stack (OS threads are ~1-2MB).</li>
+            <li>They are scheduled by the Go runtime, not the OS.</li>
+            <li>They communicate via <strong>channels</strong>.</li>
+        </ul>
+
+        <h3>Concurrency vs parallelism</h3>
+        <ul>
+            <li><strong>Concurrency</strong> - juggling many tasks but only one runs at a time on each CPU.</li>
+            <li><strong>Parallelism</strong> - tasks running at the same instant on multiple CPUs.
+                Tune with <code>runtime.GOMAXPROCS(runtime.NumCPU())</code>.</li>
+        </ul>
+
+        <h3>Worker pools</h3>
+        <p>
+            Reuse a fixed pool of goroutines to process a stream of jobs - this caps CPU and memory usage.
+        </p>
+        <pre><code>func worker(id int, jobs &lt;-chan int) {
+    for job := range jobs {
+        fmt.Printf("Worker %d processing job %d\n", id, job)
+        time.Sleep(time.Second)
+    }
+}
+
+func main() {
+    const numWorkers, numJobs = 3, 10
+    jobs := make(chan int)
+
+    for i := 1; i &lt;= numWorkers; i++ {
+        go worker(i, jobs)
+    }
+    for j := 1; j &lt;= numJobs; j++ {
+        jobs &lt;- j
+    }
+    close(jobs)
+    time.Sleep(5 * time.Second)
+}
+</code></pre>
+
+        <h3><code>sync.Mutex</code></h3>
+        <p>
+            Only one goroutine can hold the lock at any time. Anyone else calling <code>Lock()</code> blocks until
+            the holder calls <code>Unlock()</code>.
+        </p>
+        <pre><code>var mu sync.Mutex
+counter := 0
+
+go func() {
+    mu.Lock()
+    counter++
+    mu.Unlock()
+}()
+
+go func() {
+    mu.Lock()
+    fmt.Println(counter)
+    mu.Unlock()
+}()
+</code></pre>
+
+        <h3><code>sync.RWMutex</code> - reader/writer locks</h3>
+        <p>
+            <code>RWMutex</code> distinguishes between readers and writers. Multiple readers can hold the lock
+            <em>at the same time</em>; writers are exclusive.
+        </p>
+        <pre><code>rw.Lock()    // write lock - blocks all reads & other writes
+rw.Unlock()
+
+rw.RLock()   // read lock  - allows other readers, blocks writers
+rw.RUnlock()
+</code></pre>
+
+        <p>With a plain <code>Mutex</code>, three goroutines reading the same map serialise:</p>
+        <pre><code>Goroutine 1: LOCK -> READ -> UNLOCK
+Goroutine 2:        WAIT -> LOCK -> READ -> UNLOCK
+Goroutine 3:               WAIT -> LOCK -> READ -> UNLOCK
+</code></pre>
+        <p>With <code>RWMutex</code> they all read concurrently:</p>
+        <pre><code>Goroutine 1: RLOCK -> READ -> RUNLOCK
+Goroutine 2: RLOCK -> READ -> RUNLOCK
+Goroutine 3: RLOCK -> READ -> RUNLOCK
+</code></pre>
+
+        <div class="tip">
+            <p>
+                <strong>Rule of thumb:</strong> mostly reads -> <code>RWMutex</code>; many writes or simple code
+                -> plain <code>Mutex</code>. <code>RLock()</code> must <em>only</em> wrap reads -
+                writing while holding an <code>RLock</code> is a race condition.
+            </p>
+        </div>
+
+        <p>
+            Go's <code>RWMutex</code> gives <strong>writer priority</strong>: if a writer is waiting, new readers
+            are blocked until that writer finishes. This avoids writer starvation.
+        </p>
+
+        <h3><code>sync.Once</code></h3>
+        <p>Ensures a piece of code runs exactly once - perfect for lazy initialisation.</p>
+        <pre><code>var (
+    prom *ginprometheus.Prometheus
+    once sync.Once
+)
+
+func middleware() {
+    once.Do(func() {
+        prom = ginprometheus.NewPrometheus("gin")
+    })
+}
+</code></pre>
+
+        <h3><code>sync.Map</code></h3>
+        <p>A concurrent map optimised for read-heavy workloads (does <em>not</em> use an <code>RWMutex</code>
+            internally).</p>
+        <pre><code>var m sync.Map
+m.Store("key", "value")
+v, ok := m.Load("key")
+</code></pre>
+
+        <h3><code>sync/atomic</code></h3>
+        <p>
+            Atomic operations complete in a single CPU instruction - no other goroutine can ever see a half-written
+            value, and there's no lock to deadlock.
+        </p>
+        <pre><code>import "sync/atomic"
+
+var counter int64
+go func() { atomic.AddInt64(&amp;counter, 1) }()
+</code></pre>
+        <p>
+            Don't use multiple atomic ops to keep two related variables in sync - they aren't a single instruction
+            together.
+        </p>
+
+        <h3><code>time.Ticker</code></h3>
+        <pre><code>ticker := time.NewTicker(5 * time.Second)
+defer ticker.Stop()
+
+for i := 1; i &lt;= 10; i++ {
+    &lt;-ticker.C
+    fmt.Println("Processing request", i, "at", time.Now())
+}
+</code></pre>
+        <p>For a rate limiter at <em>N</em> requests per second:</p>
+        <pre><code>rate := 5
+ticker := time.NewTicker(time.Second / time.Duration(rate))
+</code></pre>
+
+        <h3><code>context.Context</code></h3>
+        <p>
+            <code>context.Context</code> carries cancellation signals, timeouts, and request-scoped values.
+            It is heavily used in HTTP handlers, DB drivers, and any RPC client.
+        </p>
+        <pre><code>// 1. Timeout - auto-cancels after 2s
+ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+defer cancel() // always release resources
+
+go func(ctx context.Context) {
+    select {
+    case &lt;-time.After(3 * time.Second):
+        fmt.Println("Work completed")
+    case &lt;-ctx.Done():
+        fmt.Println("Context cancelled:", ctx.Err())
+    }
+}(ctx)
+
+// 2. Request-scoped values
+ctx = context.WithValue(context.Background(), "userID", 12345)
+v := ctx.Value("userID")
+
+// 3. Manual cancellation
+ctx2, cancel2 := context.WithCancel(context.Background())
+cancel2() // triggers ctx2.Done()
+</code></pre>
+
+        <h3>The <code>net/http</code> package</h3>
+        <pre><code>http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+    w.Write([]byte("OK"))
+})
+http.ListenAndServe(":8080", nil)
+</code></pre>
+        <ul>
+            <li>Built-in router (<code>ServeMux</code>; Go 1.22+ supports method-prefixed patterns like
+                <code>"GET /products"</code>).
+            </li>
+            <li>One goroutine per incoming request.</li>
+            <li>Middleware via wrapping handlers.</li>
+        </ul>
+
+        <h3>Channels in depth</h3>
+        <p>
+            A channel is a typed pipe used by goroutines to send and receive values safely. There are two
+            categories: <strong>unbuffered</strong> and <strong>buffered</strong>.
+        </p>
+
+        <h4>Unbuffered channels (<code>make(chan T)</code>)</h4>
+        <p>Capacity 0 - sender and receiver must "shake hands" at the same instant.</p>
+        <ul>
+            <li>Send blocks until a receiver is ready.</li>
+            <li>Receive blocks until a sender is ready.</li>
+            <li>Useful for synchronisation between goroutines.</li>
+        </ul>
+        <pre><code>ch := make(chan int)
+
+go func() {
+    time.Sleep(time.Second)
+    fmt.Println("Received:", &lt;-ch)
+}()
+ch &lt;- 1 // blocks until the goroutine reads
+
+select {
+case ch &lt;- 3:
+    fmt.Println("Sent")
+default:
+    fmt.Println("Send would block (no receiver)")
+}
+</code></pre>
+
+        <h4>Buffered channels (<code>make(chan T, n)</code>)</h4>
+        <ul>
+            <li>Send does NOT block while the buffer has space.</li>
+            <li>Send blocks when the buffer is full.</li>
+            <li>Receive blocks when the buffer is empty.</li>
+        </ul>
+        <pre><code>ch := make(chan int, 1)
+ch &lt;- 1 // buffer was empty -> succeeds
+
+go func() {
+    time.Sleep(time.Second)
+    fmt.Println("Received:", &lt;-ch)
+}()
+ch &lt;- 2 // blocks until the receiver frees a slot
+</code></pre>
+
+        <h4>Signal-only channels (<code>chan struct{}</code>)</h4>
+        <p>
+            A channel of empty struct carries no data, consumes zero bytes per send, and is the idiomatic way
+            to notify completion or coordinate shutdowns.
+        </p>
+        <pre><code>done := make(chan struct{})
+
+go func() {
+    time.Sleep(time.Second)
+    done &lt;- struct{}{}
+}()
+
+&lt;-done
+fmt.Println("Main received signal")
+</code></pre>
+
+        <h3><code>sync.WaitGroup</code></h3>
+        <p>
+            Without it, <code>main()</code> can finish before its child goroutines run. <code>WaitGroup</code> is
+            a counter: tell it how many goroutines to wait for, mark each as done, and <code>Wait()</code> until
+            the counter reaches zero.
+        </p>
+        <pre><code>var wg sync.WaitGroup
+
+wg.Add(3)
+for i := 1; i &lt;= 3; i++ {
+    go func(n int) {
+        defer wg.Done()
+        fmt.Println("Worker", n)
+    }(i)
+}
+wg.Wait()
+</code></pre>
+
+        <h3>Deadlocks</h3>
+        <p>
+            A deadlock is "all goroutines are asleep, waiting for something that will never happen." The most
+            common cause is forgetting an <code>Unlock</code>. The fix is to always pair them with
+            <code>defer</code>:
+        </p>
+        <pre><code>mu.Lock()
+defer mu.Unlock()
+</code></pre>
+
+        <h3>Race conditions</h3>
+        <p>
+            Two or more goroutines touch the same memory and at least one writes, without synchronisation.
+            Go ships a built-in race detector:
+        </p>
+        <pre><code>go run -race main.go
+</code></pre>
+        <p>If it prints <code>WARNING: DATA RACE</code>, you forgot a lock or a channel.</p>
+
+        <h4>Fix with a mutex</h4>
+        <pre><code>var mu sync.Mutex
+var wg sync.WaitGroup
+counter := 0
+
+for i := 0; i &lt; 1000; i++ {
+    wg.Add(1)
+    go func() {
+        defer wg.Done()
+        mu.Lock()
+        counter++
+        mu.Unlock()
+    }()
+}
+wg.Wait()
+fmt.Println(counter) // 1000
+</code></pre>
+
+        <h4>Fix with a channel</h4>
+        <pre><code>counter := 0
+ch := make(chan int)
+var wg sync.WaitGroup
+
+go func() { for v := range ch { counter += v } }()
+
+for i := 0; i &lt; 1000; i++ {
+    wg.Add(1)
+    go func() { defer wg.Done(); ch &lt;- 1 }()
+}
+wg.Wait(); close(ch)
+fmt.Println(counter)
+</code></pre>
+
+        <h3>Mutex vs channel</h3>
+        <table class="table" style="max-width:700px;">
+            <thead>
+                <tr>
+                    <th>Mutex</th>
+                    <th>Channel</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Protects shared memory</td>
+                    <td>Avoids shared memory</td>
+                </tr>
+                <tr>
+                    <td>Faster for simple cases</td>
+                    <td>Safer & clearer for workflows</td>
+                </tr>
+                <tr>
+                    <td>Easy to misuse (deadlocks)</td>
+                    <td>Can block if misused</td>
+                </tr>
+                <tr>
+                    <td>Lower overhead</td>
+                    <td>More expressive</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>Dependency injection</h3>
+        <p>Go's idiomatic DI is plain constructor injection - no framework required:</p>
+        <pre><code>type Service struct { repo Repo }
+
+func NewService(r Repo) *Service { return &amp;Service{repo: r} }
+</code></pre>
+        <p>(In Part 2 we'll graduate to <code>uber/fx</code> for larger graphs.)</p>
+
+        <h3>Designing for performance and scalability</h3>
+        <ul>
+            <li>Use goroutines + channels.</li>
+            <li>Avoid shared state where possible.</li>
+            <li>Use worker pools to bound concurrency.</li>
+            <li>Cache aggressively.</li>
+            <li>Profile with <code>pprof</code>.</li>
+            <li>Scale horizontally (keep services stateless).</li>
+        </ul>
+
+        <h3>Optimising for throughput</h3>
+        <ul>
+            <li>Reduce allocations.</li>
+            <li>Use buffered channels.</li>
+            <li>Batch operations.</li>
+            <li>Reuse objects with <code>sync.Pool</code>.</li>
+            <li>Avoid blocking I/O on hot paths.</li>
+            <li>Tune the garbage collector via the heap target.</li>
+        </ul>
+
+        <h3>Best practices for distributed systems</h3>
+        <ul>
+            <li>Pass <code>context.Context</code> everywhere.</li>
+            <li>Set timeouts and use retries with backoff.</li>
+            <li>Add circuit breakers around remote calls.</li>
+            <li>Make APIs idempotent.</li>
+            <li>Use structured logging.</li>
+            <li>Implement graceful shutdowns.</li>
+            <li>Expose health checks and metrics.</li>
+        </ul>
+
+        <p>
+            That covers the language. In <strong>Part 2</strong> we put these primitives to work in a small
+            but production-shaped microservice.
+        </p>
+
+        <hr />
+
+        <h2>Part 2 - Building a <code>product-management</code> microservice</h2>
+
+        <p>
+            We will build a tiny Go service called <code>product-management</code>. It exposes two HTTP endpoints:
+        </p>
+        <ul>
+            <li><code>POST /products</code> - add a product.</li>
+            <li><code>GET /products</code> - list products.</li>
+        </ul>
+        <p>
+            The functionality is trivial on purpose. The point is the <em>shape</em> of the code:
+            <strong>hexagonal architecture</strong>, a <strong>CQRS-style command/query split</strong>,
+            <strong>interfaces</strong> for ports, and <code>uber/fx</code> for dependency injection.
+            We'll walk through it step by step, starting from the smallest possible <code>main.go</code>.
+        </p>
+
+        <h3>What is hexagonal architecture? (a 60-second crash course)</h3>
+        <p>
+            Hexagonal architecture - also called <strong>ports and adapters</strong> - is a way of organising
+            code so the <em>core business logic</em> doesn't depend on the framework, the database, or any
+            other external concern. Instead, the core defines <strong>ports</strong> (interfaces) that describe
+            what it needs from the outside world, and <strong>adapters</strong> are the concrete things that
+            plug into those ports.
+        </p>
+
+        <p>Three layers, in order from inside to outside:</p>
+        <ol>
+            <li><strong>Domain</strong> - pure business rules and entities. Imports nothing exciting (no HTTP,
+                no DB).</li>
+            <li><strong>Application</strong> - the use cases that orchestrate the domain. Depends on the
+                domain and on a set of port <em>interfaces</em>.</li>
+            <li><strong>Adapters</strong> - concrete implementations of those ports. Two flavours:
+                <ul>
+                    <li><strong>Inbound (driving)</strong> - things that <em>call into</em> the application
+                        (e.g. an HTTP handler, a CLI, a gRPC server).</li>
+                    <li><strong>Outbound (driven)</strong> - things the application <em>calls out to</em>
+                        (e.g. a database, a logger, an email service).</li>
+                </ul>
+            </li>
+        </ol>
+
+        <p>
+            The dependency direction always points <em>inward</em>:
+            <em>adapters depend on application</em>, <em>application depends on domain</em>,
+            and the domain depends on nothing. Swap MongoDB for Postgres? Write a new outbound adapter -
+            nothing else changes.
+        </p>
+
+        <h3>What is CQRS?</h3>
+        <p>
+            <strong>Command Query Responsibility Segregation</strong>: split your code into a "write side" that
+            executes commands (e.g. <code>AddProduct</code>) and a "read side" that runs queries
+            (e.g. <code>ListProducts</code>). The two sides can use different code paths and even different
+            data stores. In our example we keep the same in-memory store but expose it under two separate
+            <em>interfaces</em> (<code>ProductWriter</code> and <code>ProductReader</code>) so each side
+            only sees what it needs.
+        </p>
+
+        <h3>Why interfaces?</h3>
+        <p>
+            Interfaces are how Go expresses "I depend on something that can do X, but I don't care exactly
+            who or how." They make the inversion of dependencies in hex architecture possible. The application
+            doesn't import a Mongo driver - it imports its own <code>ProductWriter</code> interface, which
+            <em>happens to be</em> implemented by an outbound adapter that uses Mongo (or Postgres, or just a
+            map in memory).
+        </p>
+
+        <h3>The starting point</h3>
+        <p>We begin with the simplest possible <code>main.go</code> - just enough to serve a single endpoint:</p>
+        <pre><code>package main
+
+import (
+    "fmt"
+    "github.com/gin-gonic/gin"
+)
+
+func main() {
+    fmt.Println("Hello, World!")
+
+    server := gin.Default()
+    server.GET("/products", getProducts)
+    server.Run(":8080")
+}
+
+func getProducts(c *gin.Context) {
+    c.JSON(200, gin.H{"name": "Car Wipers"})
+}
+</code></pre>
+
+        <p>
+            That works, but everything is mixed together: routing, business logic, and "data" (a hard-coded
+            string). We can't test the logic without spinning up a server, and there's no place to plug in a
+            real product store. Time to refactor.
+        </p>
+
+        <h3>The target project layout</h3>
+        <pre><code>product-management/
+|-- main.go                          <- composition root
+|-- go.mod
+|-- domain/product/                  <- pure business rules, no I/O
+|   |-- product.go                   <-   Product entity + value types
+|   `-- errors.go
+|-- application/                     <- use cases (drives the domain)
+|   |-- ports.go                     <-   ProductWriter, ProductReader, IDGenerator
+|   |-- command_service.go           <-   write side of CQRS (AddProduct)
+|   `-- query_service.go             <-   read side of CQRS (ListProducts)
+`-- adapters/                        <- all I/O lives here
+    |-- in/http/                     <- inbound: HTTP endpoints
+    `-- out/memory/                  <- outbound: in-memory map (the "database")
+</code></pre>
+
+        <h3>Step 1 - The domain layer</h3>
+        <p>
+            The <code>Product</code> entity exposes a constructor that enforces invariants. Fields are
+            unexported so an invalid <code>Product</code> can't be created with a struct literal.
+        </p>
+        <pre><code>// domain/product/product.go
+package product
+
+import "strings"
+
+type ID    string
+type Name  string
+type Price int64 // minor units (e.g. cents)
+
+type Product struct {
+    id    ID
+    name  Name
+    price Price
+}
+
+func New(id ID, name Name, price Price) (Product, error) {
+    if strings.TrimSpace(string(name)) == "" {
+        return Product{}, ErrEmptyName
+    }
+    if price &lt;= 0 {
+        return Product{}, ErrInvalidPrice
+    }
+    return Product{id: id, name: name, price: price}, nil
+}
+
+func (p Product) ID() ID       { return p.id }
+func (p Product) Name() Name   { return p.name }
+func (p Product) Price() Price { return p.price }
+</code></pre>
+
+        <pre><code>// domain/product/errors.go
+package product
+
+import "errors"
+
+var (
+    ErrEmptyName     = errors.New("product name is empty")
+    ErrInvalidPrice  = errors.New("product price must be positive")
+    ErrAlreadyExists = errors.New("product already exists")
+)
+</code></pre>
+
+        <h3>Step 2 - The application layer (ports + use cases)</h3>
+        <p>
+            Ports are tiny interfaces that describe <em>what the application needs</em>. The split between
+            <code>ProductWriter</code> and <code>ProductReader</code> is the CQRS pattern at the type level.
+        </p>
+        <pre><code>// application/ports.go
+package application
+
+import (
+    "context"
+    "cmd/product-management/domain/product"
+)
+
+type ProductWriter interface {
+    Save(ctx context.Context, p product.Product) error
+}
+
+type ProductReader interface {
+    List(ctx context.Context) ([]product.Product, error)
+}
+
+type IDGenerator interface { NewID() product.ID }
+
+type ProductView struct {
+    ID    string `json:"id"`
+    Name  string `json:"name"`
+    Price int64  `json:"price"`
+}
+
+func viewOf(p product.Product) ProductView {
+    return ProductView{ID: string(p.ID()), Name: string(p.Name()), Price: int64(p.Price())}
+}
+</code></pre>
+
+        <pre><code>// application/command_service.go
+package application
+
+import (
+    "context"
+    "fmt"
+    "cmd/product-management/domain/product"
+)
+
+type CommandService struct {
+    writer ProductWriter
+    ids    IDGenerator
+}
+
+func NewCommandService(w ProductWriter, ids IDGenerator) *CommandService {
+    return &amp;CommandService{writer: w, ids: ids}
+}
+
+type AddProductCommand struct {
+    Name  string
+    Price int64
+}
+
+type AddProductResult struct{ ID string }
+
+func (s *CommandService) AddProduct(ctx context.Context, cmd AddProductCommand) (AddProductResult, error) {
+    id := s.ids.NewID()
+    p, err := product.New(id, product.Name(cmd.Name), product.Price(cmd.Price))
+    if err != nil {
+        return AddProductResult{}, fmt.Errorf("add product: %w", err)
+    }
+    if err := s.writer.Save(ctx, p); err != nil {
+        return AddProductResult{}, fmt.Errorf("save product: %w", err)
+    }
+    return AddProductResult{ID: string(id)}, nil
+}
+</code></pre>
+
+        <pre><code>// application/query_service.go
+package application
+
+import "context"
+
+type QueryService struct{ reader ProductReader }
+
+func NewQueryService(r ProductReader) *QueryService { return &amp;QueryService{reader: r} }
+
+func (s *QueryService) ListProducts(ctx context.Context) ([]ProductView, error) {
+    products, err := s.reader.List(ctx)
+    if err != nil { return nil, err }
+    views := make([]ProductView, 0, len(products))
+    for _, p := range products { views = append(views, viewOf(p)) }
+    return views, nil
+}
+</code></pre>
+
+        <h3>Step 3 - The outbound adapter (in-memory database)</h3>
+        <p>
+            One <code>map[ID]Product</code> behind a <code>sync.RWMutex</code>. The same instance will be
+            wrapped under both <code>ProductWriter</code> and <code>ProductReader</code> in <code>main.go</code>.
+        </p>
+        <pre><code>// adapters/out/memory/products.go
+package memory
+
+import (
+    "context"
+    "sort"
+    "sync"
+    "cmd/product-management/domain/product"
+)
+
+type ProductRepository struct {
+    mu    sync.RWMutex
+    store map[product.ID]product.Product
+}
+
+func NewProductRepository() *ProductRepository {
+    return &amp;ProductRepository{store: make(map[product.ID]product.Product)}
+}
+
+func (r *ProductRepository) Save(ctx context.Context, p product.Product) error {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    if _, exists := r.store[p.ID()]; exists {
+        return product.ErrAlreadyExists
+    }
+    r.store[p.ID()] = p
+    return nil
+}
+
+func (r *ProductRepository) List(ctx context.Context) ([]product.Product, error) {
+    r.mu.RLock()
+    out := make([]product.Product, 0, len(r.store))
+    for _, p := range r.store { out = append(out, p) }
+    r.mu.RUnlock()
+
+    sort.Slice(out, func(i, j int) bool { return out[i].Name() &lt; out[j].Name() })
+    return out, nil
+}
+</code></pre>
+
+        <h3>Step 4 - The inbound HTTP adapter</h3>
+        <p>
+            Two handlers, decoded from JSON, calling the application services. We use <code>net/http</code>'s
+            built-in <code>ServeMux</code> here (it supports method-prefixed patterns since Go 1.22).
+        </p>
+        <pre><code>// adapters/in/http/handler.go
+package http
+
+import (
+    "log/slog"
+    "net/http"
+    "cmd/product-management/application"
+)
+
+type Handler struct {
+    commands *application.CommandService
+    queries  *application.QueryService
+    logger   *slog.Logger
+}
+
+func NewHandler(c *application.CommandService, q *application.QueryService, l *slog.Logger) *Handler {
+    return &amp;Handler{commands: c, queries: q, logger: l}
+}
+
+func (h *Handler) Routes() http.Handler {
+    mux := http.NewServeMux()
+    mux.HandleFunc("GET /products",  h.listProducts)
+    mux.HandleFunc("POST /products", h.addProduct)
+    return mux
+}
+</code></pre>
+
+        <pre><code>// adapters/in/http/product_handler.go
+package http
+
+import (
+    "encoding/json"
+    "errors"
+    "log/slog"
+    "net/http"
+    "cmd/product-management/application"
+    "cmd/product-management/domain/product"
+)
+
+func (h *Handler) listProducts(w http.ResponseWriter, r *http.Request) {
+    views, err := h.queries.ListProducts(r.Context())
+    if err != nil {
+        h.logger.ErrorContext(r.Context(), "list products failed", slog.Any("error", err))
+        writeError(w, http.StatusInternalServerError, "failed to list products")
+        return
+    }
+    writeJSON(w, http.StatusOK, map[string]any{"products": views})
+}
+
+type addReq  struct { Name string `json:"name"`; Price int64 `json:"price"` }
+
+func (h *Handler) addProduct(w http.ResponseWriter, r *http.Request) {
+    var req addReq
+    if err := json.NewDecoder(r.Body).Decode(&amp;req); err != nil {
+        writeError(w, http.StatusBadRequest, "invalid JSON body")
+        return
+    }
+    res, err := h.commands.AddProduct(r.Context(), application.AddProductCommand{Name: req.Name, Price: req.Price})
+    if err != nil {
+        switch {
+        case errors.Is(err, product.ErrEmptyName),
+             errors.Is(err, product.ErrInvalidPrice),
+             errors.Is(err, product.ErrAlreadyExists):
+            writeError(w, http.StatusBadRequest, err.Error())
+        default:
+            writeError(w, http.StatusInternalServerError, "failed to add product")
+        }
+        return
+    }
+    writeJSON(w, http.StatusCreated, map[string]string{"id": res.ID})
+}
+</code></pre>
+
+        <h3>Step 5 - The composition root (<code>main.go</code>)</h3>
+        <p>
+            <code>main.go</code> is the only place that knows about both interfaces and concrete adapters.
+            It picks the implementations and wires them together.
+        </p>
+        <pre><code>package main
+
+import (
+    "context"
+    "crypto/rand"
+    "encoding/hex"
+    "errors"
+    "log/slog"
+    "net/http"
+    "os"
+    "os/signal"
+    "syscall"
+    "time"
+
+    httpadapter "cmd/product-management/adapters/in/http"
+    "cmd/product-management/adapters/out/memory"
+    "cmd/product-management/application"
+    "cmd/product-management/domain/product"
+)
+
+type randomIDs struct{}
+
+func (randomIDs) NewID() product.ID {
+    var b [16]byte
+    if _, err := rand.Read(b[:]); err != nil {
+        return product.ID(time.Now().UTC().Format("20060102T150405.000000000"))
+    }
+    return product.ID(hex.EncodeToString(b[:]))
+}
+
+func main() {
+    logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+    repo     := memory.NewProductRepository()
+    commands := application.NewCommandService(repo, randomIDs{})
+    queries  := application.NewQueryService(repo)
+    handler  := httpadapter.NewHandler(commands, queries, logger).Routes()
+
+    server := &amp;http.Server{Addr: ":8080", Handler: handler, ReadHeaderTimeout: 5 * time.Second}
+
+    // graceful shutdown on SIGINT/SIGTERM
+    stop := make(chan os.Signal, 1)
+    signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+    go func() {
+        if err := server.ListenAndServe(); err != nil &amp;&amp; !errors.Is(err, http.ErrServerClosed) {
+            logger.Error("http server error", slog.Any("error", err))
+            os.Exit(1)
+        }
+    }()
+    &lt;-stop
+
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+    _ = server.Shutdown(ctx)
+}
+</code></pre>
+
+        <h3>Step 6 - Build and test</h3>
+        <pre><code>go build ./...
+go vet ./...
+go run .
+
+# in another terminal
+curl -X POST -H 'Content-Type: application/json' \
+     -d '{"name":"Car Wipers","price":1999}' \
+     http://localhost:8080/products
+# => 201 {"id":"..."}
+
+curl http://localhost:8080/products
+# => 200 {"products":[{"id":"...","name":"Car Wipers","price":1999}]}
+</code></pre>
+
+        <hr />
+
+        <h3>An interesting observation: an empty <code>go.mod</code></h3>
+        <p>
+            At this point the entire <code>go.mod</code> is just three lines:
+        </p>
+        <pre><code>module cmd/product-management
+
+go 1.22
+</code></pre>
+        <p>
+            Why? Because <strong>the project doesn't import anything outside the Go standard library</strong>,
+            so there's nothing for <code>go.mod</code> to declare. Every <code>import</code> statement in the
+            project resolves to either (a) a stdlib package, or (b) a package inside this same module.
+        </p>
+
+        <h4>Standard library (no <code>require</code> line, ever)</h4>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Import</th>
+                    <th>Used by</th>
+                    <th>Why</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>net/http</code></td>
+                    <td>HTTP adapter, <code>main.go</code></td>
+                    <td>web server + the <code>ServeMux</code> router</td>
+                </tr>
+                <tr>
+                    <td><code>encoding/json</code></td>
+                    <td>HTTP adapter</td>
+                    <td>request/response (de)serialisation</td>
+                </tr>
+                <tr>
+                    <td><code>log/slog</code></td>
+                    <td>HTTP adapter, <code>main.go</code></td>
+                    <td>structured logging</td>
+                </tr>
+                <tr>
+                    <td><code>context</code></td>
+                    <td>everywhere</td>
+                    <td>request-scoped cancellation</td>
+                </tr>
+                <tr>
+                    <td><code>errors</code></td>
+                    <td>HTTP adapter, domain, <code>main.go</code></td>
+                    <td><code>errors.Is</code>, sentinel errors</td>
+                </tr>
+                <tr>
+                    <td><code>fmt</code></td>
+                    <td>application, adapters</td>
+                    <td><code>fmt.Errorf</code> wrapping</td>
+                </tr>
+                <tr>
+                    <td><code>strings</code></td>
+                    <td>domain</td>
+                    <td><code>TrimSpace</code> for name validation</td>
+                </tr>
+                <tr>
+                    <td><code>sort</code></td>
+                    <td>memory adapter</td>
+                    <td>stable list ordering</td>
+                </tr>
+                <tr>
+                    <td><code>sync</code></td>
+                    <td>memory adapter</td>
+                    <td><code>RWMutex</code> around the map</td>
+                </tr>
+                <tr>
+                    <td><code>crypto/rand</code>, <code>encoding/hex</code></td>
+                    <td><code>main.go</code></td>
+                    <td>random hex IDs</td>
+                </tr>
+                <tr>
+                    <td><code>time</code></td>
+                    <td><code>main.go</code></td>
+                    <td>shutdown timeout, ID fallback</td>
+                </tr>
+                <tr>
+                    <td><code>os</code>, <code>os/signal</code>, <code>syscall</code></td>
+                    <td><code>main.go</code></td>
+                    <td>graceful shutdown on SIGINT/SIGTERM</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h4>Internal imports (part of the same module - not dependencies)</h4>
+        <ul>
+            <li><code>cmd/product-management/domain/product</code></li>
+            <li><code>cmd/product-management/application</code></li>
+            <li><code>cmd/product-management/adapters/in/http</code></li>
+            <li><code>cmd/product-management/adapters/out/memory</code></li>
+        </ul>
+
+        <p>
+            The original <code>go.mod</code> we started with had <code>gin</code> plus a long list of
+            <code>// indirect</code> entries (<code>bytedance/sonic</code>, <code>quic-go</code>,
+            <code>mongo-driver</code>, etc. - all of them gin's transitive deps). Once we replaced gin with
+            <code>net/http</code> from the standard library, every one of those became unreachable from the
+            import graph. <code>go mod tidy</code> would have removed them automatically.
+        </p>
+
+        <p>
+            For each of the things you'd typically reach for in a real project, the standard library has a
+            credible answer:
+        </p>
+        <table class="table" style="max-width:800px;">
+            <thead>
+                <tr>
+                    <th>What you'd typically reach for</th>
+                    <th>Stdlib equivalent we used instead</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>gin</code> / <code>chi</code> / <code>echo</code> for routing</td>
+                    <td><code>net/http</code> <code>ServeMux</code> (Go 1.22+ supports
+                        <code>"GET /products"</code> patterns)
+                    </td>
+                </tr>
+                <tr>
+                    <td><code>zerolog</code> / <code>zap</code> for logging</td>
+                    <td><code>log/slog</code> (added in Go 1.21)</td>
+                </tr>
+                <tr>
+                    <td><code>google/uuid</code> for IDs</td>
+                    <td><code>crypto/rand</code> + <code>encoding/hex</code></td>
+                </tr>
+            </tbody>
+        </table>
+        <p>
+            This is why the <code>go.mod</code> stayed empty - <strong>by design, not by accident</strong>.
+            The moment we want a real DB or a richer router, we'd add a <code>require</code> line and run
+            <code>go mod tidy</code>.
+        </p>
+
+        <hr />
+
+        <h3>Step 7 - Switching to the Go ecosystem libraries</h3>
+        <p>
+            Stdlib is great for clarity, but most real services prefer ecosystem libraries:
+        </p>
+        <ul>
+            <li><strong>HTTP</strong>: <code>net/http</code> <code>ServeMux</code> ->
+                <code>github.com/gin-gonic/gin</code></li>
+            <li><strong>Logging</strong>: <code>log/slog</code> -> <code>github.com/rs/zerolog</code></li>
+            <li><strong>ID generation</strong>: <code>crypto/rand</code> + <code>encoding/hex</code> ->
+                <code>github.com/google/uuid</code></li>
+        </ul>
+
+        <p>
+            The beautiful thing is that <strong>only the HTTP adapter and <code>main.go</code> change</strong>.
+            Domain, application ports, and the in-memory repo are byte-for-byte identical - that's the architecture
+            earning its keep.
+        </p>
+
+        <pre><code>go get github.com/gin-gonic/gin@latest
+go get github.com/google/uuid@latest
+go get github.com/rs/zerolog@latest
+go mod tidy
+</code></pre>
+
+        <p>The HTTP handler now uses gin and zerolog:</p>
+        <pre><code>// adapters/in/http/handler.go (after migration)
+func (h *Handler) Routes() http.Handler {
+    engine := gin.New()
+    engine.Use(gin.Recovery())
+    engine.HandleMethodNotAllowed = true // gin returns 404 by default for wrong methods
+
+    engine.GET("/products",  h.listProducts)
+    engine.POST("/products", h.addProduct)
+    return engine
+}
+</code></pre>
+
+        <p><code>main.go</code> swaps in <code>uuid</code> and <code>zerolog</code>:</p>
+        <pre><code>type uuidIDs struct{}
+
+func (uuidIDs) NewID() product.ID { return product.ID(uuid.NewString()) }
+
+func main() {
+    gin.SetMode(gin.ReleaseMode)
+    logger := zerolog.New(os.Stdout).Level(zerolog.InfoLevel).With().Timestamp().Logger()
+    // ...
+}
+</code></pre>
+
+        <p>
+            After running <code>go mod tidy</code>, <code>go.mod</code> now declares <code>gin</code>,
+            <code>google/uuid</code>, and <code>rs/zerolog</code> as direct dependencies, plus the transitive
+            ones gin pulls in (<code>bytedance/sonic</code>, <code>go-playground/validator</code>, etc.) as
+            <code>// indirect</code>.
+        </p>
+
+        <hr />
+
+        <h3>A note on Go toolchains</h3>
+
+        <p>
+            When you run <code>go run</code>, <code>go build</code>, or <code>go get</code>, the Go command
+            looks at the <code>go</code> directive at the top of <code>go.mod</code>:
+        </p>
+        <pre><code>module cmd/product-management
+
+go 1.22
+</code></pre>
+        <p>
+            That line says: <em>the minimum Go version this module needs is 1.22</em>. Since Go 1.21, the
+            toolchain has a feature called <strong>automatic toolchain switching</strong>: if your locally
+            installed Go is older than what <code>go.mod</code> requires, Go will quietly download a newer
+            toolchain on the fly.
+        </p>
+
+        <p>That convenience can bite you in two situations:</p>
+        <ul>
+            <li><strong>You're offline / sandboxed.</strong> If <code>go.mod</code> says <code>go 1.25.0</code>
+                but you have Go 1.24.5 installed and no network access, the build fails with a cryptic error
+                rather than just using your local Go.</li>
+            <li><strong>You want strict, reproducible control over which toolchain is used.</strong> The auto-fetch
+                hides version drift in CI logs.</li>
+        </ul>
+
+        <p>I hit the first case while writing this post. The original <code>go.mod</code> had:</p>
+        <pre><code>go 1.25.0
+</code></pre>
+        <p>but the available Go was 1.24.5, so the build failed with:</p>
+        <pre><code>go: toolchain upgrade needed to resolve github.com/gin-gonic/gin
+go: github.com/gin-gonic/gin@v1.12.0 requires go &gt;= 1.25.0
+</code></pre>
+
+        <h4>The <code>GOTOOLCHAIN</code> environment variable</h4>
+        <p>
+            Setting <code>GOTOOLCHAIN=local</code> tells Go to <em>only</em> use whatever is installed locally
+            and never to download a newer toolchain:
+        </p>
+        <pre><code>GOTOOLCHAIN=local go build ./...
+GOTOOLCHAIN=local go run .
+</code></pre>
+        <p>
+            If a dependency requires a Go version newer than your local one, the build will simply fail rather
+            than auto-fetching - which is exactly what you want in CI, sandboxes, or when you're debugging
+            "why did this build differently on my machine?".
+        </p>
+
+        <h4>The <code>toolchain</code> directive in <code>go.mod</code></h4>
+        <p>
+            When <code>go get</code> pulls in a dependency that needs a newer Go than your current
+            <code>go</code> directive allows, it does two things to <code>go.mod</code>:
+        </p>
+        <ol>
+            <li>Bumps the <code>go</code> directive up to the dependency's minimum.</li>
+            <li>Adds a <code>toolchain</code> line pinning the toolchain that was used.</li>
+        </ol>
+
+        <p>
+            For example, after <code>go get go.uber.org/fx@latest</code> on our project,
+            <code>go.mod</code> went from this:
+        </p>
+        <pre><code>module cmd/product-management
+
+go 1.22
+</code></pre>
+        <p>...to this:</p>
+        <pre><code>module cmd/product-management
+
+go 1.23
+
+toolchain go1.24.5
+</code></pre>
+
+        <p>What do those two lines actually mean?</p>
+        <ul>
+            <li><code>go 1.23</code> - the <strong>minimum</strong> Go version anyone needs to compile this
+                module. Some dependency we just pulled in requires at least 1.23.</li>
+            <li><code>toolchain go1.24.5</code> - the <strong>suggested</strong> toolchain that was used when
+                we last built. If a teammate has only Go 1.21 installed, Go will try to fetch
+                <code>go1.24.5</code> for them automatically (unless they set
+                <code>GOTOOLCHAIN=local</code>).
+            </li>
+        </ul>
+
+        <h4>Why I pinned <code>gin v1.10.1</code> instead of <code>@latest</code></h4>
+        <p>
+            At the time of writing, the latest <code>gin</code> was <code>v1.12.0</code>, and it requires
+            Go &gt;= 1.25.0. Our local Go was 1.24.5 and we wanted to keep the local toolchain. So instead of
+            triggering an auto-download, I pinned to <code>gin v1.10.1</code>, which supports Go &gt;= 1.20:
+        </p>
+        <pre><code>go get github.com/gin-gonic/gin@v1.10.1
+</code></pre>
+        <p>
+            Once your local Go is upgraded to 1.25+, you can switch back to
+            <code>go get github.com/gin-gonic/gin@latest</code> and <code>go.mod</code> will auto-bump.
+        </p>
+
+        <h4>Quick rule of thumb</h4>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Situation</th>
+                    <th>What to do</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Building in a sandboxed / offline / CI environment</td>
+                    <td><code>GOTOOLCHAIN=local</code></td>
+                </tr>
+                <tr>
+                    <td>You want strict reproducibility over which Go is used</td>
+                    <td><code>GOTOOLCHAIN=local</code></td>
+                </tr>
+                <tr>
+                    <td>You want Go to fetch the right version automatically</td>
+                    <td>leave <code>GOTOOLCHAIN</code> unset (default is <code>auto</code>)</td>
+                </tr>
+                <tr>
+                    <td>Adding a dep that requires a newer Go than yours</td>
+                    <td>pin to an older version of the dep, or upgrade your local Go</td>
+                </tr>
+                <tr>
+                    <td><code>go.mod</code> says e.g. <code>go 1.25.0</code> but your local Go is older</td>
+                    <td>upgrade Go, lower the <code>go</code> directive, or set
+                        <code>GOTOOLCHAIN=local</code> and pick deps that don't need newer
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="tip">
+            <p>
+                <strong>TL;DR:</strong> the <code>go</code> line in <code>go.mod</code> is the
+                <em>minimum</em> Go version your module needs; the <code>toolchain</code> line is the
+                <em>preferred</em> toolchain to build it with. <code>GOTOOLCHAIN=local</code> opts you out
+                of automatic toolchain downloads - useful in CI, sandboxes, or anywhere you want full control
+                over which Go binary actually compiles your code.
+            </p>
+        </div>
+        
+        <hr />
+
+        <h3>Step 8 - Adding <code>uber/fx</code> for dependency injection</h3>
+
+        <h4>What we had before</h4>
+        <p>
+            Up to now, our <code>main.go</code> manually wired every constructor:
+        </p>
+        <pre><code>repo     := memory.NewProductRepository()
+commands := application.NewCommandService(repo, uuidIDs{})
+queries  := application.NewQueryService(repo)
+handler  := httpadapter.NewHandler(commands, queries, logger).Routes()
+server   := &amp;http.Server{Addr: ":8080", Handler: handler}
+</code></pre>
+        <p>
+            This works fine for four components, but as the graph grows you have to keep track of construction
+            order by hand, signal handling and graceful shutdown end up sprinkled across <code>main.go</code>,
+            and writing integration tests means re-implementing the wiring with stubs.
+        </p>
+
+        <h4>What is <code>uber/fx</code>?</h4>
+        <p>
+            <code>uber/fx</code> is a dependency injection framework. You hand it a bag of constructors via
+            <code>fx.Provide(...)</code>; fx introspects each constructor's <em>parameter</em> and <em>return</em>
+            types, builds the dependency graph, and runs constructors in the right order. Each value is built
+            <em>at most once</em> and reused everywhere it's needed. On top of that, fx provides a
+            <code>Lifecycle</code> that lets you register <code>OnStart</code> and <code>OnStop</code> hooks
+            for clean startup and graceful shutdown, an <code>fx.Shutdowner</code> for triggering shutdown
+            programmatically, and automatic SIGINT / SIGTERM handling via <code>app.Run()</code>.
+        </p>
+
+        <h4>Key fx primitives</h4>
+        <ul>
+            <li><strong><code>fx.Provide(...)</code></strong> - register one or more constructors. Purely
+                declarative; nothing runs yet.</li>
+            <li><strong><code>fx.Invoke(...)</code></strong> - register a function whose <em>execution</em> is
+                the goal. fx will build everything that function needs (transitively), then call it.</li>
+            <li><strong><code>fx.Lifecycle</code></strong> - injected automatically. Use
+                <code>lc.Append(fx.Hook{OnStart, OnStop})</code> to plug into the app's start / stop sequence.
+            </li>
+            <li><strong><code>fx.Shutdowner</code></strong> - injected automatically. Call
+                <code>shutdowner.Shutdown(fx.ExitCode(1))</code> to trigger graceful shutdown from anywhere
+                in the graph.
+            </li>
+            <li><strong><code>fx.WithLogger(...)</code></strong> - lets you replace fx's default startup
+                logger.</li>
+            <li><strong><code>fx.Replace</code> / <code>fx.Decorate</code></strong> - swap or wrap a provided
+                value (the testing seam).</li>
+        </ul>
+
+        <h4>The <code>appOptions</code> / <code>newApp</code> / <code>main</code> pattern</h4>
+        <p>
+            This is the same pattern used in larger Uber-style services and matches what we use in production
+            on similar projects. <code>main()</code> shrinks to a single line:
+        </p>
+
+        <pre><code>// main.go - with uber/fx
+package main
+
+import (
+    "context"
+    "errors"
+    "net/http"
+    "os"
+    "time"
+
+    httpadapter "cmd/product-management/adapters/in/http"
+    "cmd/product-management/adapters/out/memory"
+    "cmd/product-management/application"
+    "cmd/product-management/domain/product"
+
+    "github.com/gin-gonic/gin"
+    "github.com/google/uuid"
+    "github.com/rs/zerolog"
+    "go.uber.org/fx"
+    "go.uber.org/fx/fxevent"
+)
+
+const (
+    httpAddr        = ":8080"
+    shutdownTimeout = 5 * time.Second
+)
+
+type uuidIDs struct{}
+func (uuidIDs) NewID() product.ID { return product.ID(uuid.NewString()) }
+
+func newLogger() zerolog.Logger {
+    return zerolog.New(os.Stdout).Level(zerolog.InfoLevel).With().Timestamp().Logger()
+}
+
+func asIDGenerator() application.IDGenerator                              { return uuidIDs{} }
+func asWriter(r *memory.ProductRepository) application.ProductWriter      { return r }
+func asReader(r *memory.ProductRepository) application.ProductReader      { return r }
+
+func newHTTPHandler(h *httpadapter.Handler) http.Handler { return h.Routes() }
+
+func newHTTPServer(handler http.Handler) *http.Server {
+    return &amp;http.Server{Addr: httpAddr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
+}
+
+// registerHTTPServer wires the *http.Server into fx's lifecycle.
+func registerHTTPServer(
+    lc fx.Lifecycle,
+    logger zerolog.Logger,
+    server *http.Server,
+    shutdowner fx.Shutdowner,
+) {
+    lc.Append(fx.Hook{
+        OnStart: func(ctx context.Context) error {
+            go func() {
+                logger.Info().Str("addr", server.Addr).Msg("http server starting")
+                if err := server.ListenAndServe(); err != nil &amp;&amp; !errors.Is(err, http.ErrServerClosed) {
+                    logger.Error().Err(err).Msg("http server error")
+                    _ = shutdowner.Shutdown(fx.ExitCode(1))
+                }
+            }()
+            return nil
+        },
+        OnStop: func(ctx context.Context) error {
+            shutdownCtx, cancel := context.WithTimeout(ctx, shutdownTimeout)
+            defer cancel()
+            return server.Shutdown(shutdownCtx)
+        },
+    })
+}
+
+// appOptions returns the fx options describing the application graph.
+// Splitting it out lets tests inject overrides via fx.Replace / fx.Decorate
+// without redefining the whole graph.
+func appOptions(overrides ...fx.Option) []fx.Option {
+    gin.SetMode(gin.ReleaseMode)
+
+    opts := []fx.Option{
+        // Silence fx's own startup chatter; in production a service
+        // would bridge fxevent into its main logger.
+        fx.WithLogger(func() fxevent.Logger { return fxevent.NopLogger }),
+
+        fx.Provide(
+            // Infrastructure
+            newLogger,
+            asIDGenerator,
+
+            // Outbound adapter: in-memory repository, exposed under both ports.
+            memory.NewProductRepository,
+            asWriter,
+            asReader,
+
+            // Application services (use cases)
+            application.NewCommandService,
+            application.NewQueryService,
+
+            // Inbound HTTP adapter
+            httpadapter.NewHandler,
+            newHTTPHandler,
+            newHTTPServer,
+        ),
+
+        fx.Invoke(registerHTTPServer),
+    }
+    return append(opts, overrides...)
+}
+
+func newApp(overrides ...fx.Option) *fx.App { return fx.New(appOptions(overrides...)...) }
+
+func main() { newApp().Run() }
+</code></pre>
+
+        <h4>Reading the new graph</h4>
+        <ul>
+            <li>The <code>fx.Provide(...)</code> block lists every constructor. fx looks at each one's
+                signature: <code>application.NewCommandService(ProductWriter, IDGenerator)</code> tells fx
+                "to build a <code>*CommandService</code>, first build a <code>ProductWriter</code> and an
+                <code>IDGenerator</code>." It then walks the graph until everything is satisfied.
+            </li>
+            <li>Two tiny <em>port adapter</em> functions, <code>asWriter</code> and <code>asReader</code>,
+                expose the same <code>*memory.ProductRepository</code> instance under the two CQRS interfaces.
+                fx caches by exact type, so without these helpers it wouldn't know that the repo also
+                <em>satisfies</em> <code>ProductWriter</code> and <code>ProductReader</code>.
+            </li>
+            <li><code>fx.Invoke(registerHTTPServer)</code> kicks the whole graph off: nothing actually runs
+                until something is invoked. fx supplies <code>fx.Lifecycle</code> and
+                <code>fx.Shutdowner</code> automatically; everything else (logger, server) comes from the
+                providers above.
+            </li>
+            <li><code>app.Run()</code> builds the graph, runs every <code>OnStart</code> hook in dependency
+                order, blocks on SIGINT / SIGTERM, and finally runs every <code>OnStop</code> hook in
+                <em>reverse</em> order.
+            </li>
+        </ul>
+
+        <div class="tip">
+            <p>
+                <strong>About <code>fx.WithLogger(... fxevent.NopLogger)</code>:</strong> by default fx prints
+                its own startup banner -
+                <code>[Fx] PROVIDE memory.NewProductRepository</code>,
+                <code>[Fx] INVOKE registerHTTPServer</code>, and so on. Useful when you're learning fx, but
+                noisy in production. Setting the logger to <code>fxevent.NopLogger</code> silences that stream.
+                A real production service usually writes a small <code>fxevent.Logger</code> adapter that
+                converts fx's structured events into calls on the main logger (e.g. zerolog), so they appear
+                in the same JSON log stream as everything else.
+            </p>
+        </div>
+
+        <h4>Why bother with fx at this scale?</h4>
+        <p>
+            For four components, manual wiring is fine. The argument for fx grows with the graph:
+        </p>
+        <ul>
+            <li><strong>Production</strong>: <code>func main() { newApp().Run() }</code> is the whole entry
+                point. Add a Mongo client, a Kafka producer, an OpenTelemetry exporter, a reconciliation worker,
+                a gRPC server - they're each one or two lines added to <code>fx.Provide</code>, and fx figures
+                out construction order.</li>
+            <li><strong>Tests</strong>: <code>newApp(fx.Replace(myFakeClock, myInProcListener)).Start(ctx)</code>.
+                Same graph, swapped pieces, no parallel wiring code.</li>
+            <li><strong>Lifecycle</strong>: every component that needs start / stop registers an
+                <code>fx.Hook</code>. <code>OnStop</code> runs in reverse order automatically, so a Mongo
+                client constructed before the worker is also disconnected after the worker stops.
+            </li>
+        </ul>
+
+        <h3>Verification</h3>
+        <p>The endpoints behave the same as before, but the wiring is now declarative:</p>
+        <pre><code># start
+go run .
+# {"level":"info","addr":":8080","time":"...","message":"http server starting"}
+
+# add a product
+curl -X POST -H 'Content-Type: application/json' \
+     -d '{"name":"Car Wipers","price":1999}' \
+     http://localhost:8080/products
+# 201 {"id":"7d8d17cf-909c-4173-bd90-4e777acc60aa"}    <- a real UUID
+
+# list products
+curl http://localhost:8080/products
+# 200 {"products":[{"id":"...","name":"Car Wipers","price":1999}]}
+
+# graceful shutdown
+# Ctrl+C
+# {"level":"info","time":"...","message":"http server stopped"}
+</code></pre>
+
+        <h3>Wrapping up</h3>
+        <p>
+            Starting from a 22-line <code>main.go</code> with hard-coded data, we ended up with a service that
+            is:
+        </p>
+        <ul>
+            <li><strong>Layered cleanly</strong> - domain, application, adapters - so business logic doesn't
+                depend on HTTP, logging, or storage.</li>
+            <li><strong>CQRS-ready</strong> - reads and writes go through different interfaces today, even if
+                they share storage.</li>
+            <li><strong>Library-agnostic</strong> - swapping <code>net/http</code> for gin and
+                <code>log/slog</code> for zerolog only touched two files.
+            </li>
+            <li><strong>Wired with fx</strong> - construction order, lifecycle hooks, and graceful shutdown
+                are declarative.</li>
+            <li><strong>Easy to extend</strong> - adding a Postgres backend means writing one new outbound
+                adapter and adding one line to <code>fx.Provide</code>.</li>
+        </ul>
+
+        <p>
+            That's the whole point of investing in this kind of structure: the small example you saw here is
+            the <em>same shape</em> as a much larger production service. The cost is a bit more boilerplate up
+            front; the payoff is that your business logic stays clean as the surrounding infrastructure
+            inevitably grows.
+        </p>
+
+    </div>
+</body>
+
+</html>
