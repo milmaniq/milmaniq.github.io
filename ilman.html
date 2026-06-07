@@ -489,7 +489,8 @@ func (s *Dao) GetUsersByTenantPage(ctx, tenantID, page, pageSize) { ... }
         <li><strong>Goroutine</strong> — A lightweight thread in Go that runs concurrently.</li>
         <li><strong>WaitGroup</strong> — A synchronization primitive that lets you wait until a set of goroutines
           has finished. Each goroutine calls <code>Done()</code> when finished. The main thread calls
-          <code>Wait()</code> to block until all goroutines are done.</li>
+          <code>Wait()</code> to block until all goroutines are done.
+        </li>
         <li><strong>conc.WaitGroup</strong> — A safer, cleaner replacement for <code>sync.WaitGroup</code>. It
           tracks goroutines, catches panics, and simplifies concurrency management.</li>
       </ul>
@@ -951,6 +952,106 @@ err = rs.ts.Run(ctx, func(ctx context.Context, repo core.Repository) error {
       </p>
     </section>
 
+    <section>
+      <h3>Concurrent SCIM Create User: Conflict on SCIM Source Aggregate</h3>
+
+      <p class="problem">&#10060; Problem</p>
+      <p>
+        The SCIM Create User endpoint is triggered when users are provisioned via SCIM (e.g., from
+        Entra ID). When two concurrent create-user requests arrive simultaneously, a
+        <strong>Concurrent Access Error</strong> occurs because both requests attempt to update the
+        same field (<code>userLastSync</code>) in the same SCIM Source aggregate. Since the aggregate
+        is versioned, concurrent updates result in a version conflict.
+      </p>
+
+      <p class="root-cause">&#128269; Root Cause</p>
+      <p>
+        The SCIM Source aggregate uses <strong>optimistic locking</strong>. Updating
+        <code>userLastSync</code> inside the aggregate on every create-user call means parallel
+        requests race to increment the same version, and one always loses.
+      </p>
+
+      <h4>Attempted Solutions &amp; Why They Fall Short</h4>
+
+      <p><strong>1. Mutex (In-Memory Lock)</strong></p>
+      <p>
+        Introduce a per-SCIM-source mutex so only one request executes at a time; other requests
+        wait and retry. Different SCIM sources still process in parallel.
+      </p>
+      <p class="problem">Problem: Works only in a single-pod deployment. In a multi-pod setup each
+        pod has its own memory, so the mutex is ineffective across pods.</p>
+
+      <p><strong>2. Distributed Locking (MongoDB-based)</strong></p>
+      <p>
+        Use a distributed lock (e.g., via <code>core.LockManager</code>) to allow only one request
+        to update the SCIM Source at a time across all pods.
+      </p>
+      <p class="problem">Problem: Becomes a bottleneck &#8212; effectively forces SCIM provisioning
+        to run sequentially across the entire fleet, reducing scalability and throughput.</p>
+
+      <p><strong>3. Partial Update Outside Aggregate (Non-versioned <code>$set</code>)</strong></p>
+      <p>
+        Stop updating the SCIM Source aggregate inside the transaction; update
+        <code>userLastSync</code> separately using a non-versioned MongoDB <code>$set</code>.
+      </p>
+      <p class="problem">Problem: Breaks aggregate consistency rules. An aggregate must be treated
+        as a single unit of data; partial updates outside it violate domain design principles.</p>
+
+      <p class="fix">&#9989; Final Solution</p>
+      <p>
+        <strong>Do not update the SCIM Source aggregate at all.</strong> Instead:
+      </p>
+      <ul>
+        <li>Store the sync timestamp (<code>userLastSync</code>) in the <strong>User aggregate</strong>.</li>
+        <li>Each user record maintains its own sync timestamp &#8212; no shared mutable state, no version conflicts.
+        </li>
+        <li>To derive <code>userLastSync</code> per SCIM Source: query users by <code>scimSourceId</code>
+          and compute the latest sync timestamp from those users.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h3>Flaky Mongo Testcontainer: ReplicaSetNoPrimary / length of read message too large</h3>
+
+      <p class="problem">&#10060; Error</p>
+      <pre>
+--- FAIL: TestReconciliationWorker_ApplicationClientsToProcess (49.35s)
+
+    reconciliation_worker_integration_test.go:72:
+
+        Error Trace: reconciliation_worker_integration_test.go:72
+        Error:       Received unexpected error:
+                     ping mongodb: server selection error: context deadline exceeded,
+                     current topology: { Type: ReplicaSetNoPrimary, Servers: [{
+                       Addr: localhost:32833, Type: Unknown,
+                       Last error: connection(localhost:32833[-289])
+                         length of read message too large: length of read message too large
+                     }] }
+        Test:        TestReconciliationWorker_ApplicationClientsToProcess
+      </pre>
+
+      <p class="root-cause">&#128269; Root Cause</p>
+      <p>
+        This is a startup race in the <strong>testcontainers Mongo replica-set module</strong>: it
+        reports the container &#8220;ready&#8221; before a PRIMARY is actually elected. The driver then performs
+        full replica-set discovery and a single no-retry ping &#8212; if that ping lands in the election
+        window, the test fails. The failure is pure timing and is worse in CI under load.
+      </p>
+
+      <p class="fix">&#9989; Fix (in the shared helper <code>mongo_testcontainer.go</code>)</p>
+      <ul>
+        <li>Force <code>directConnection=true</code> in the connection string to skip the racy
+          replica-set discovery phase.</li>
+        <li>Add a bounded connect retry loop to ride out the election window before the test begins.</li>
+      </ul>
+
+      <p>
+        This fix is applied once in the shared helper and benefits <strong>all</strong> Mongo
+        integration tests, not just this one.
+      </p>
+    </section>
+
+
 
     <section>
       <h3>Tell, Don’t Ask Principle (DDD / OOP)</h3>
@@ -1085,26 +1186,34 @@ if err := scimSourceState.CanProvision(s.clock.NowUTC()); err != nil {
       <h4>Core Concepts</h4>
       <ul>
         <li><strong>Event</strong> — Represents business facts (something that already happened).
-          <br>Example: <code>OrderPlaced</code>, <code>PaymentConfirmed</code>.</li>
+          <br>Example: <code>OrderPlaced</code>, <code>PaymentConfirmed</code>.
+        </li>
         <li><strong>Command</strong> — Instruction to perform an action — if successful, it results in one or
           more events.
-          <br>Example: <code>PlaceOrder</code>, <code>CancelOrder</code>.</li>
+          <br>Example: <code>PlaceOrder</code>, <code>CancelOrder</code>.
+        </li>
         <li><strong>Policy</strong> — Automatic reaction to a domain event that may issue a new command
           (business rule/logic).
-          <br>Example: After <code>PaymentFailed</code>, a policy may issue <code>NotifyUser</code>.</li>
+          <br>Example: After <code>PaymentFailed</code>, a policy may issue <code>NotifyUser</code>.
+        </li>
         <li><strong>Aggregate</strong> — A domain object.
-          <br>Example: <code>Order</code>, <code>Cart</code>.</li>
+          <br>Example: <code>Order</code>, <code>Cart</code>.
+        </li>
         <li><strong>User Role</strong> — Actor (person or system) that initiates commands, which may
           eventually cause events.
-          <br>Example: <code>Customer</code>, <code>Admin</code>, <code>InventoryService</code>.</li>
+          <br>Example: <code>Customer</code>, <code>Admin</code>, <code>InventoryService</code>.
+        </li>
         <li><strong>Process</strong> — Listens to an event and decides to issue a new command —
           orchestrating multi-step workflows.
-          <br>Example: After <code>OrderPlaced</code>, the process triggers <code>ReserveInventory</code>.</li>
+          <br>Example: After <code>OrderPlaced</code>, the process triggers <code>ReserveInventory</code>.
+        </li>
         <li><strong>View</strong> — UI for displaying event data. Often part of CQRS.
-          <br>Example: <code>OrderSummary UI</code>, <code>UserProfile UI</code>.</li>
+          <br>Example: <code>OrderSummary UI</code>, <code>UserProfile UI</code>.
+        </li>
         <li><strong>Hot Spot</strong> — Highlights uncertainties, conflicts, or missing info that need to be
           clarified during modeling.
-          <br>Example: <em>"Who owns payment retry logic?"</em></li>
+          <br>Example: <em>"Who owns payment retry logic?"</em>
+        </li>
       </ul>
     </section>
 
@@ -1154,7 +1263,8 @@ if err := scimSourceState.CanProvision(s.clock.NowUTC()); err != nil {
           <ul>
             <li>Port: <code>OrderRepository</code> interface / <code>PaymentGatewayPort</code></li>
             <li>Adapter: <code>PostgresOrderRepository</code> or <code>MongoOrderRepository</code> /
-              <code>StripePaymentAdapter</code> or <code>PaypalPaymentAdapter</code></li>
+              <code>StripePaymentAdapter</code> or <code>PaypalPaymentAdapter</code>
+            </li>
           </ul>
         </li>
       </ul>
@@ -1262,6 +1372,40 @@ chore(release): merge main into release/1.14.0
 
       <p>
         💡 Tip: Always make sure you are on the correct target branch before running the merge.
+      </p>
+    </section>
+
+    <section>
+      <h3>Merging main into a Release Branch via a Dedicated Topic Branch</h3>
+
+      <p>
+        To safely bring in the latest changes from <code>main</code> into a release branch
+        (e.g., <code>release/curity_perf</code>), create a dedicated topic branch instead of
+        merging directly:
+      </p>
+
+      <pre>
+git checkout release/curity_perf
+git checkout -b topic/PLAT-33045_merge_main
+git pull origin main
+# resolve conflicts locally
+git push origin topic/PLAT-33045_merge_main
+# open a PR back to release/curity_perf
+      </pre>
+
+      <p>
+        This approach isolates conflict resolution to the topic branch and keeps the release branch
+        stable until the PR is reviewed and approved.
+      </p>
+
+      <p class="fix">⚠️ Use a Normal Merge (Not Squash)</p>
+      <p>
+        Because this PR represents a <strong>branch synchronisation</strong> rather than a single
+        logical change, it must be merged with a <strong>normal merge commit</strong>. A normal merge
+        preserves the full commit history from <code>main</code> and maintains proper branch ancestry,
+        which lets Git track what has already been integrated and avoids repeated conflicts in future
+        merges. Squashing collapses all commits into one, breaks this history, and makes future
+        integrations significantly harder.
       </p>
     </section>
 
@@ -2327,6 +2471,85 @@ kubectl get svc -n &lt;ingress-namespace&gt;</code></pre>
     </section>
 
     <section>
+      <h3>What Is Authentication?</h3>
+      <p>
+        <strong>Authentication</strong> means verifying the identity of a caller based on
+        credentials. The credential could be:
+      </p>
+      <ul>
+        <li>Username + Password</li>
+        <li>Client ID + Client Secret</li>
+        <li>API key</li>
+        <li>Session cookie</li>
+        <li>Access token</li>
+        <li>Certificate</li>
+      </ul>
+
+      <h4>1. Username + Password</h4>
+      <p>
+        The client sends a username and password; the server verifies the password. At the moment
+        the server verifies the password, <strong>authentication has occurred</strong>.
+      </p>
+      <p>The server may then create a session cookie, issue a JWT, return an access token, or do
+        nothing further &#8212; authentication happened regardless.</p>
+
+      <h4>2. Secret (Password, Client Secret, or API Key)</h4>
+      <p>
+        A <strong>secret</strong> is a credential used to authenticate a client or user. The server
+        stores a hashed version; the client presents the plain secret to prove identity.
+      </p>
+      <pre>
+Authorization: Bearer my-secret-value
+# or
+x-api-key: my-secret-value
+      </pre>
+      <p>
+        The API receives the secret, hashes it, compares with the stored hash, and if they match
+        the caller is authenticated &#8212; because the caller has proved possession of a valid
+        credential.
+      </p>
+
+      <p><strong>Authorization with secrets &#8212; two cases:</strong></p>
+      <ul>
+        <li>
+          <strong>Case A: Single secret for the entire API</strong><br>
+          You have one stored secret hash and nothing else. A valid secret grants all permissions.
+          Common in simple SCIM implementations.
+        </li>
+        <li>
+          <strong>Case B: Multiple secrets / clients</strong><br>
+          Each secret maps to a permission set (e.g., read-only, read+write, admin). After
+          authenticating the secret, you look up the associated permissions and perform
+          authorization checks.
+        </li>
+      </ul>
+
+      <h4>3. Access Token</h4>
+      <p>
+        A <strong>token</strong> is a credential that represents an authenticated identity and may
+        also carry authorization information. Tokens are issued after successful authentication and
+        typically have an expiration time.
+      </p>
+      <pre>
+Authorization: Bearer eyJ...
+      </pre>
+      <p>Before the token was issued, the client authenticated to Curity, Curity validated the
+        credentials, and Curity issued the token.</p>
+      <p>When your API receives the token, it validates: signature (JWT) or introspection (opaque
+        token), issuer, audience, and expiration. If valid, the API accepts the caller&#8217;s
+        identity &#8212; that acceptance is also authentication.</p>
+      <p>
+        After authenticating the token, you perform authorization based on the <code>scope</code>
+        claim (e.g., <code>scope</code> must contain <code>scim.read</code>).
+      </p>
+      <p>
+        <strong>Is token validation authentication?</strong> Yes. The API authenticates the caller
+        by validating an access token issued by a trusted authority (Curity). You are not
+        authenticating the client directly, but you are authenticating its token.
+      </p>
+    </section>
+
+    <section>
       <h3>Federation Concepts</h3>
       <p><strong>Federation</strong> = One system trusting another system’s users or identities (tokens).</p>
       <ul>
@@ -2354,6 +2577,30 @@ kubectl get svc -n &lt;ingress-namespace&gt;</code></pre>
             <li>But, Curity delegates login to Azure AD, which acts as the external IdP.</li>
           </ul>
         </li>
+      </ul>
+    </section>
+
+    <section>
+      <h3>Identity Provider vs Authorization Server</h3>
+      <p>
+        In OAuth2 and OpenID Connect, the terms <strong>Identity Provider (IdP)</strong> and
+        <strong>Authorization Server</strong> are closely related but have distinct roles:
+      </p>
+      <ul>
+        <li><strong>Identity Provider (IdP)</strong> &#8212; focuses on <em>authenticating the
+          user</em>. Handles login (e.g., obtaining an authorization code by passing credentials
+          to an external IdP).</li>
+        <li><strong>Authorization Server</strong> &#8212; focuses on <em>issuing tokens</em>.
+          Handles exchanging the authorization code for an access token, or issuing tokens for
+          client credentials.</li>
+      </ul>
+      <p>
+        Curity acts as <strong>both</strong>: it authenticates the user (IdP) and issues tokens
+        based on scopes and grant types (Authorization Server).
+      </p>
+      <ul>
+        <li>IdP &#8594; <em>authentication</em> (who you are)</li>
+        <li>Authorization Server &#8594; <em>authorization</em> (what you can do)</li>
       </ul>
     </section>
 
@@ -2455,6 +2702,69 @@ kubectl get svc -n &lt;ingress-namespace&gt;</code></pre>
     </section>
 
     <section>
+      <h3>Authentication in OAuth</h3>
+      <p>
+        Authentication in OAuth depends on the grant type being used.
+      </p>
+
+      <h4>Authorization Code Flow</h4>
+      <p>Both the user and the client are involved:</p>
+      <ul>
+        <li>The user authenticates (e.g., username/password, MFA, passkey).</li>
+        <li>The client identifies itself (using PKCE and optionally a client secret).</li>
+        <li>The authorization server issues tokens.</li>
+      </ul>
+      <p>The resulting access token represents: <em>the authenticated user acting through the
+        authenticated client.</em></p>
+
+      <h4>Client Credentials Flow</h4>
+      <p>No user is involved:</p>
+      <ul>
+        <li>The client application authenticates itself using a client secret, private key, or
+          certificate.</li>
+        <li>The authorization server issues a token.</li>
+      </ul>
+      <p>The resulting access token represents: <em>the authenticated client application
+        itself.</em></p>
+    </section>
+
+    <section>
+      <h3>Purpose of Scopes When Obtaining a Token</h3>
+      <p>
+        In OAuth2, a <strong>scope</strong> defines the level of access a client is requesting.
+        Scopes are sent in the <code>/oauth-token</code> request (e.g.,
+        <code>scope=openid email scim.read</code>) and must be recognized and allowed for the
+        client.
+      </p>
+
+      <ul>
+        <li>
+          <strong><code>openid</code></strong> &#8212; triggers OpenID Connect behavior; an ID
+          token is issued. The ID token contains user identity information (<code>sub</code>,
+          <code>iss</code>, <code>aud</code>, etc.), is used by the client to verify the
+          authenticated user, and can be passed as <code>id_token_hint</code> in logout requests
+          to identify which session to terminate.
+        </li>
+        <li>
+          <strong><code>profile</code></strong> &#8212; includes profile-related claims
+          (e.g., <code>name</code>, <code>preferred_username</code>). Claims are configured and
+          linked to the <code>profile</code> scope in the IdP; they are only included in the token
+          when this scope is requested.
+        </li>
+        <li>
+          <strong>Custom scopes</strong> (e.g., <code>scim.read</code>) &#8212; represent
+          API-level permissions. Included in the <code>scope</code> claim of the access token and
+          used by APIs to authorize actions (e.g., read SCIM users/groups).
+        </li>
+      </ul>
+
+      <p>
+        <strong>When no scope is provided:</strong> the server may apply default scopes or issue a
+        limited token, depending on configuration.
+      </p>
+    </section>
+
+    <section>
       <h3>What is SCIM?</h3>
 
       <p>
@@ -2494,6 +2804,207 @@ kubectl get svc -n &lt;ingress-namespace&gt;</code></pre>
       <p>
         💡 So in this setup: <strong>Entra is the identity authority, Curity is the identity broker.</strong>
       </p>
+    </section>
+
+    <section>
+      <h3>Why is a SCIM Secret Called a &#8220;Bearer Token&#8221;?</h3>
+      <p>
+        In SCIM, the term <strong>&#8220;Bearer token&#8221;</strong> refers to <em>how</em> the
+        value is sent in the HTTP request (via the
+        <code>Authorization: Bearer &lt;value&gt;</code> header), not necessarily what the value
+        actually is. In systems like Entra SCIM provisioning, the value itself is typically a
+        long-lived, static credential &#8212; meaning it behaves like a <strong>secret</strong>
+        (similar to an API key).
+      </p>
+      <p>
+        However, because it is transmitted using the Bearer token convention, it is referred to as
+        a &#8220;token.&#8221; So in practice, it is a secret that is simply carried using the
+        Bearer token format.
+      </p>
+    </section>
+
+    <section>
+      <h3>SCIM API Authentication with Entra Provisioning &#8212; Q&amp;A</h3>
+
+      <h4>Q: What is the best approach for SCIM API authentication with Entra provisioning?</h4>
+      <p>The best approach is to use <strong>OAuth 2.0 Client Credentials with Curity</strong>
+        rather than long-lived static bearer secrets validated directly by the application.</p>
+      <p>
+        Entra ID obtains a short-lived access token from Curity using the
+        <code>client_credentials</code> grant and sends that token to the SCIM API. The SCIM API
+        validates the token instead of a permanent shared secret.
+      </p>
+
+      <h4>Q: What is the problem with using a static secret directly as the bearer token?</h4>
+      <p>A static bearer secret works technically, but has several security and architectural
+        limitations:</p>
+      <ul>
+        <li>The secret is usually long-lived or non-expiring.</li>
+        <li>If leaked, an attacker can provision/deprovision users and call SCIM APIs until the
+          secret is rotated.</li>
+        <li>No proper token lifecycle management.</li>
+        <li>Cannot easily perform authorization using scopes.</li>
+        <li>Harder to support revocation, rotation, client isolation, and auditability.</li>
+        <li>Not the industry-standard model for enterprise integrations.</li>
+      </ul>
+      <p>This approach essentially treats the bearer token as an API key / shared secret.</p>
+
+      <h4>Q: When would using a static secret directly as the bearer token or an API key be acceptable?</h4>
+      <p>A static secret may be acceptable in simpler environments such as:</p>
+      <ul>
+        <li>Internal-only systems (e.g., no public ingress, VPN-protected)</li>
+        <li>Isolated networks (e.g., tight firewall rules)</li>
+      </ul>
+
+      <h4>Q: Why is OAuth 2.0 Client Credentials with Curity better?</h4>
+      <ul>
+        <li>Access tokens are <strong>short-lived</strong> &#8212; even if stolen, the impact
+          window is limited.</li>
+        <li>The API can perform authorization using scopes such as <code>scim.read</code> /
+          <code>scim.write</code>.</li>
+        <li>Follows the industry-standard OAuth2 model.</li>
+        <li>Easier secret rotation and operational management.</li>
+        <li>Better auditing and monitoring.</li>
+        <li>Cleaner separation of responsibilities: Curity handles authentication and token
+          issuance; the SCIM API handles authorization and business logic.</li>
+      </ul>
+
+      <h4>Q: In OAuth2 <code>client_credentials</code>, isn&#8217;t the client secret still long-lived?</h4>
+      <p>
+        Yes &#8212; the client secret itself is still long-lived. However, the key difference is
+        that the client secret is used <em>only to obtain</em> short-lived access tokens and is
+        never sent to the SCIM API directly.
+      </p>
+      <pre>
+# Static secret approach (avoid)
+Authorization: Bearer &lt;permanent-secret&gt;
+
+# OAuth2 client_credentials approach (recommended)
+Entra &#8594; Curity &#8594; obtain short-lived access token
+Authorization: Bearer &lt;short-lived-access-token&gt;
+      </pre>
+      <p>Even if the access token is leaked, it expires quickly.</p>
+
+      <h4>Q: What is the recommended architecture?</h4>
+      <pre>
+Entra ID SCIM Provisioning
+        |
+client_id + client_secret
+        |
+Curity Token Endpoint
+        |
+short-lived access token
+        |
+SCIM API
+      </pre>
+      <p>The SCIM API validates JWT access tokens by:</p>
+      <ul>
+        <li>Verifying the signature via JWKS.</li>
+        <li>Validating issuer, audience, expiry, and scopes.</li>
+      </ul>
+      <p>This is the modern enterprise-grade SCIM authentication model.</p>
+    </section>
+
+    <section>
+      <h3>OAuth2 Client Credentials vs Basic Auth for Service-to-Service Communication</h3>
+
+      <h4>Q: What is the best choice for internal K8s cluster-to-cluster communication</h4>
+      <p>
+        For internal service-to-service communication from one Kubernetes cluster to another, the
+        best choice is usually still <strong>OAuth2 <code>client_credentials</code></strong> rather
+        than Basic Auth, because it gives:
+      </p>
+      <ul>
+        <li>Short-lived access tokens</li>
+        <li>Scopes / authorization</li>
+        <li>Industry-standard service-to-service authentication</li>
+      </ul>
+
+      <h4>Q: What is the problem with Basic Auth?</h4>
+      <p>Basic Auth means: <code>Authorization: Basic base64(username:password)</code></p>
+      <p>Problems:</p>
+      <ul>
+        <li>Credentials are long-lived</li>
+        <li>Password is sent on every request</li>
+        <li>No expiry</li>
+        <li>Difficult rotation</li>
+        <li>No scopes / authorization model</li>
+        <li>Leaked credentials remain usable until manually changed</li>
+      </ul>
+      <p>It behaves like a permanent shared secret.</p>
+
+      <h4>Q: Why is OAuth2 better even inside Kubernetes?</h4>
+      <p>
+        It is tempting to think: <em>&#8220;It&#8217;s internal traffic, so Basic Auth is
+        enough.&#8221;</em> But internal networks are not fully trusted anymore. In Kubernetes
+        environments, pods can be compromised, logs may leak headers, and secrets may leak.
+      </p>
+      <p>OAuth2 reduces blast radius because:</p>
+      <ul>
+        <li>Tokens expire</li>
+        <li>Scopes limit permissions</li>
+        <li>Access can be revoked centrally (whether clients are allowed to obtain or use tokens)</li>
+      </ul>
+
+      <h4>Q: When is Basic Auth acceptable?</h4>
+      <p>Basic Auth is acceptable if:</p>
+      <ul>
+        <li>Internal-only system (e.g., no public ingress)</li>
+        <li>Temporary integration</li>
+        <li>No authorization requirements</li>
+        <li>Operational simplicity is more important than security maturity</li>
+      </ul>
+    </section>
+
+    <section>
+      <h3>Basic Auth Token vs OAuth2 Token</h3>
+
+      <table style="border-collapse:collapse;width:100%">
+        <thead>
+          <tr>
+            <th style="border:1px solid #ccc;padding:6px 10px;text-align:left">Aspect</th>
+            <th style="border:1px solid #ccc;padding:6px 10px;text-align:left">Basic Auth</th>
+            <th style="border:1px solid #ccc;padding:6px 10px;text-align:left">OAuth2 Access Token</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="border:1px solid #ccc;padding:6px 10px">What is sent</td>
+            <td style="border:1px solid #ccc;padding:6px 10px"><code>base64(username:password)</code></td>
+            <td style="border:1px solid #ccc;padding:6px 10px">A signed, short-lived token (JWT or opaque)</td>
+          </tr>
+          <tr>
+            <td style="border:1px solid #ccc;padding:6px 10px">Credential exposure</td>
+            <td style="border:1px solid #ccc;padding:6px 10px">Actual credentials sent on every request</td>
+            <td style="border:1px solid #ccc;padding:6px 10px">Token sent; credentials never leave the auth server</td>
+          </tr>
+          <tr>
+            <td style="border:1px solid #ccc;padding:6px 10px">Expiry</td>
+            <td style="border:1px solid #ccc;padding:6px 10px">None &#8212; valid until password changes</td>
+            <td style="border:1px solid #ccc;padding:6px 10px">Short-lived (e.g., minutes to hours)</td>
+          </tr>
+          <tr>
+            <td style="border:1px solid #ccc;padding:6px 10px">Scopes / permissions</td>
+            <td style="border:1px solid #ccc;padding:6px 10px">None built-in</td>
+            <td style="border:1px solid #ccc;padding:6px 10px">Encoded in token (e.g., <code>scim.read</code>)</td>
+          </tr>
+          <tr>
+            <td style="border:1px solid #ccc;padding:6px 10px">Revocation</td>
+            <td style="border:1px solid #ccc;padding:6px 10px">Requires password change</td>
+            <td style="border:1px solid #ccc;padding:6px 10px">Token expires; client access can be revoked centrally</td>
+          </tr>
+          <tr>
+            <td style="border:1px solid #ccc;padding:6px 10px">Header format</td>
+            <td style="border:1px solid #ccc;padding:6px 10px"><code>Authorization: Basic &lt;base64&gt;</code></td>
+            <td style="border:1px solid #ccc;padding:6px 10px"><code>Authorization: Bearer &lt;token&gt;</code></td>
+          </tr>
+          <tr>
+            <td style="border:1px solid #ccc;padding:6px 10px">Standard</td>
+            <td style="border:1px solid #ccc;padding:6px 10px">RFC 7617</td>
+            <td style="border:1px solid #ccc;padding:6px 10px">RFC 6749 (OAuth2) + RFC 7519 (JWT)</td>
+          </tr>
+        </tbody>
+      </table>
     </section>
 
     <section>
@@ -2743,7 +3254,8 @@ buf generate
       <h4>Prerequisites for Using Buf</h4>
       <ul>
         <li><code>buf.gen.yaml</code> containing the <code>protoc-gen-go</code> and
-          <code>protoc-gen-go-grpc</code> plugins</li>
+          <code>protoc-gen-go-grpc</code> plugins
+        </li>
         <li><code>buf.yaml</code></li>
         <li>proto files</li>
       </ul>
@@ -2881,7 +3393,8 @@ ilman@IFSCLIENT-01046:.../ifs-technology-security-nexus_user_management_svc$ go 
 
       <ul>
         <li>These scripts probably came from Windows (where lines end in <code>\r\n</code>, aka
-          <strong>CRLF</strong>).</li>
+          <strong>CRLF</strong>).
+        </li>
         <li>Linux expects lines to end in <code>\n</code> (<strong>LF</strong> only).</li>
       </ul>
 
@@ -3178,6 +3691,86 @@ github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.1
   https://&lt;curity-domain&gt;/&lt;profile-id&gt;/introspect</code></pre>
         </li>
       </ul>
+    </section>
+
+    <section>
+      <h3>JWT Validation using JWKS</h3>
+
+      <p>
+        JWT validation is the process of ensuring that a token is authentic, issued by a trusted
+        IdP / Authorization Server (e.g., Curity), and allowed to access a resource. It has two
+        main parts: <strong>signature verification</strong> (using JWKS) and
+        <strong>claims validation</strong>.
+      </p>
+
+      <h4>What is JWKS?</h4>
+      <p>
+        <strong>JWKS</strong> (JSON Web Key Set) is an endpoint exposed by the IdP that provides
+        public keys. APIs (resource servers) use these keys to verify JWT signatures. The IdP signs
+        tokens with a private key; the corresponding public key is shared via JWKS.
+      </p>
+
+      <h4>How the JWKS URL is Obtained</h4>
+      <ul>
+        <li>Derive from the trusted issuer (<code>iss</code>):</li>
+      </ul>
+      <pre>
+iss = https://idsvr.company.com/oauth/v2/oauth-anonymous
+  → https://idsvr.company.com/oauth/v2/oauth-anonymous/.well-known/openid-configuration
+  → response contains: jwks_uri
+      </pre>
+      <p>
+        Alternatively, <code>jwks_uri</code> can be statically configured in the application.<br>
+        <strong>&#9888;&#65039; Do NOT blindly trust the <code>iss</code> in the token &#8212;
+        the issuer must be pre-configured and trusted.</strong>
+      </p>
+
+      <h4>Validation Flow</h4>
+      <ol>
+        <li><strong>Extract JWT</strong> from the <code>Authorization: Bearer &lt;JWT&gt;</code> header.</li>
+        <li><strong>Decode JWT header</strong> (do not trust yet) &#8212; read <code>alg</code> and
+          <code>kid</code>.</li>
+        <li><strong>Obtain JWKS</strong> &#8212; call
+          <code>&lt;issuer&gt;/.well-known/openid-configuration</code>, read <code>jwks_uri</code>,
+          fetch JWKS.</li>
+        <li><strong>Select correct key</strong> &#8212; match JWT <code>kid</code> with a key in
+          JWKS.</li>
+        <li>
+          <strong>Verify signature &#9989;</strong> (critical step) &#8212; use the public key
+          matching <code>kid</code> and the algorithm from the token (e.g., RS256).<br>
+          This proves the token was issued by the trusted IdP and has not been modified.<br>
+          <em>This step only proves authenticity &#8212; it does not validate expiry, audience,
+          or permissions. Reject the token immediately if verification fails.</em>
+        </li>
+        <li>
+          <strong>Validate claims &#9989;</strong> &#8212; check:
+          <ul>
+            <li><code>iss</code> &#8212; must match expected IdP</li>
+            <li><code>aud</code> &#8212; must match your API</li>
+            <li><code>exp</code> &#8212; token must not be expired</li>
+            <li><code>nbf</code> &#8212; token must be valid now</li>
+            <li><code>iat</code> &#8212; optional sanity check</li>
+            <li><code>scope</code> &#8212; must contain required permissions (e.g., <code>scim.read</code>)</li>
+          </ul>
+        </li>
+      </ol>
+
+      <h4>Key Concepts</h4>
+      <ul>
+        <li>Signature verification &#8800; full validation.</li>
+        <li>JWKS is used only for signature verification.</li>
+        <li>Claims validation enforces access control.</li>
+        <li><strong>Key rotation:</strong> the IdP may rotate keys (new <code>kid</code>). Cache JWKS
+          and re-fetch when a <code>kid</code> is not found.</li>
+      </ul>
+
+      <p class="fix">&#9989; Summary</p>
+      <p>
+        JWT validation ensures the token is <strong>genuine</strong> (signature verified via JWKS),
+        <strong>valid</strong> (claims checked), and has the
+        <strong>required permissions</strong> (scope validated). Only after full validation should
+        the API trust and process the request.
+      </p>
     </section>
 
     <section>
