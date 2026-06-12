@@ -1410,6 +1410,50 @@ git push origin topic/PLAT-33045_merge_main
     </section>
 
     <section>
+      <h3>Bitbucket SSH — Connection Refused on Port 22</h3>
+
+      <p>
+        When SSH is configured to use the default port 22 for Bitbucket, you may hit a
+        connection error on corporate networks where the firewall blocks outbound port 22.
+      </p>
+
+      <p><strong>Initial <code>~/.ssh/config</code> entry:</strong></p>
+      <pre>
+Host bitbucket.org
+  HostName bitbucket.org
+  IdentityFile ~/.ssh/nexus-bitbucket
+  AddKeysToAgent yes</pre>
+
+      <p class="problem">⚠️ Problem</p>
+      <p>Running <code>ssh -T git@bitbucket.org</code> returns:</p>
+      <pre>
+Connection closed by &lt;IP&gt; port 22</pre>
+
+      <p>
+        <strong>Reason:</strong> the company firewall <strong>blocks port 22 (SSH)</strong> but
+        allows <strong>port 443 (HTTPS / secure web)</strong>.
+        Bitbucket provides an alternative SSH endpoint on port 443 specifically for this scenario.
+      </p>
+
+      <p class="fix">✅ Fix — switch to port 443</p>
+      <p>Update <code>~/.ssh/config</code> to use Bitbucket's alternate hostname and port 443:</p>
+      <pre>
+Host bitbucket.org
+  HostName altssh.bitbucket.org
+  Port 443
+  IdentityFile ~/.ssh/nexus-bitbucket
+  AddKeysToAgent yes</pre>
+
+      <p>Test again:</p>
+      <pre>
+ssh -T git@bitbucket.org</pre>
+
+      <p>Expected response:</p>
+      <pre>
+authenticated via ssh key</pre>
+    </section>
+
+    <section>
       <h3>Code Review in Cursor — Agent Review</h3>
 
       <p>

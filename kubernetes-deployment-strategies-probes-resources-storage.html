@@ -374,6 +374,39 @@ spec:
       Without a startup probe, a slow-starting container might be killed by the liveness probe before it finishes
       initializing.</p>
 
+    <h4>How probes reach the Pod &mdash; kubelet calls the container directly</h4>
+    <p>
+      Health probes are sent <strong>directly to the Pod</strong> by the <code>kubelet</code> running on the node &mdash;
+      they never go through the Service. The kubelet calls the probe endpoint directly on the Pod's IP and container port:
+    </p>
+    <pre><code>http://&lt;pod-ip&gt;:&lt;container-port&gt;/healthz</code></pre>
+    <p>The Service is completely bypassed during health checks. The Service is used only for application traffic:</p>
+    <ol>
+      <li><strong>Ingress</strong> routes traffic to the Service using the Service port (not the container port).</li>
+      <li><strong>Service</strong> load-balances across ready Pods and forwards the request to the <code>targetPort</code>
+        on the Pod (<code>port &rarr; targetPort</code>).</li>
+      <li><strong>Pod</strong> &mdash; the application inside must be running and listening on that container port to
+        handle the request.</li>
+    </ol>
+
+    <table>
+      <tr>
+        <th>Path</th>
+        <th>Used for</th>
+        <th>Goes through Service?</th>
+      </tr>
+      <tr>
+        <td>kubelet &rarr; Pod (direct, via pod IP)</td>
+        <td>Health probes (liveness, readiness, startup)</td>
+        <td>No</td>
+      </tr>
+      <tr>
+        <td>Client &rarr; Ingress &rarr; Service &rarr; Pod</td>
+        <td>Application traffic</td>
+        <td>Yes</td>
+      </tr>
+    </table>
+
     <h3>Resource Requests and Limits</h3>
     <p>Every container in a Pod can declare <code>requests</code> (guaranteed minimum) and <code>limits</code>
       (maximum allowed). Kubernetes uses these to schedule Pods onto Nodes and enforce resource boundaries.</p>

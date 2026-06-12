@@ -102,7 +102,12 @@
         <ul>
             <li><code>go mod init</code> - initialises a new module (creates <code>go.mod</code>).</li>
             <li><code>go get</code> - adds or updates a dependency.<br />
-                Example: <code>go get github.com/sirupsen/logrus@v1.10.0</code></li>
+                Example: <code>go get github.com/sirupsen/logrus@v1.10.0</code><br />
+                The <code>-u</code> flag tells Go to also upgrade the dependency (and its own dependencies)
+                to the newest compatible minor or patch version. Without <code>-u</code>,
+                <code>go get</code> only adds the package if it isn't already present, or locks it to the
+                version you explicitly specify. Downloaded modules are stored in the module cache at
+                <code>$GOPATH/pkg/mod</code> (check with <code>go env GOPATH</code>).</li>
             <li><code>go mod download</code> - downloads everything listed in <code>go.mod</code> into the module cache
                 (<code>$GOPATH/pkg/mod</code>) without changing <code>go.mod</code> or <code>go.sum</code>. It verifies
                 downloads against <code>go.sum</code> and fails on a checksum mismatch.</li>
@@ -150,6 +155,35 @@ go 1.20
 require github.com/sirupsen/logrus v1.10.0
 </code></pre>
 
+        <h3>Module naming conventions</h3>
+        <p>
+            The module name should match the URL path where the code lives. For a repository
+            <code>milmaniq.github.io</code> on GitHub under account <code>milmaniq</code>, with the Go
+            project in a subfolder <code>rest-api</code>, you would run:
+        </p>
+        <pre><code>cd rest-api
+go mod init github.com/milmaniq/milmaniq.github.io/rest-api
+</code></pre>
+        <p>This creates a <code>go.mod</code> like:</p>
+        <pre><code>module github.com/milmaniq/milmaniq.github.io/rest-api
+
+go 1.26.1
+</code></pre>
+        <p>
+            The version on the <code>go</code> line comes from the Go compiler installed on your system.
+            Many projects shorten it to major + minor only (<code>go 1.26</code>) because that is all that
+            matters for language and toolchain compatibility.
+        </p>
+        <div class="tip">
+            <p>
+                <strong>Monorepo pattern:</strong> a single Git repository can host multiple Go modules,
+                each with its own <code>go.mod</code>. The module name for each follows the repository path
+                plus the subfolder — e.g. <code>github.com/myorg/myrepo/service-a</code> and
+                <code>github.com/myorg/myrepo/service-b</code> — keeping import paths unique across the
+                whole repository.
+            </p>
+        </div>
+
         <h3><code>go.mod</code> vs <code>go.sum</code></h3>
         <ul>
             <li><code>go.mod</code> - contains which versions of dependencies your module uses (similar to
@@ -159,6 +193,81 @@ require github.com/sirupsen/logrus v1.10.0
                 A <strong>checksum</strong> is a hash of a file or data that ensures data integrity; in Go modules,
                 it verifies that downloaded dependencies haven't been tampered with.</li>
         </ul>
+
+        <h4>Indirect (transitive) dependencies</h4>
+        <p>
+            When you add a direct dependency, that package may depend on further packages of its own. Those
+            extra packages are called <strong>indirect</strong> or <strong>transitive</strong> dependencies —
+            you didn't ask for them explicitly, but they're needed transitively. Go records them in
+            <code>go.mod</code> with an <code>// indirect</code> comment, and their checksums appear in
+            <code>go.sum</code>:
+        </p>
+        <pre><code>require (
+    github.com/gin-gonic/gin v1.10.1        // direct  - you added this
+    github.com/bytedance/sonic v1.11.6      // indirect - gin pulled this in
+    golang.org/x/crypto v0.23.0             // indirect - gin pulled this in
+)
+</code></pre>
+        <p>
+            <code>go mod tidy</code> keeps these in sync: it removes any indirect entries that are no longer
+            reachable from your code's import graph and adds any that are missing.
+        </p>
+
+        <h3>Managing imports</h3>
+        <p>
+            VS Code with the Go extension auto-adds import statements when you save a file. If that doesn't
+            happen automatically, you can manage imports with:
+        </p>
+        <ul>
+            <li><code>go fmt</code> — formats code but does <em>not</em> manage import statements.</li>
+            <li><code>goimports</code> — formats code <em>and</em> automatically adds or removes import
+                statements. Install it with:
+                <pre><code>go install golang.org/x/tools/cmd/goimports@latest</code></pre>
+            </li>
+        </ul>
+
+        <h4>Full workflow for adding an external package</h4>
+        <ol>
+            <li>Download it into the module cache (<code>$GOPATH/pkg/mod</code>):
+                <pre><code>go get -u github.com/gin-gonic/gin</code></pre>
+            </li>
+            <li>Use it in your code (e.g. <code>server := gin.Default()</code>). VS Code will auto-add the
+                import statement on save, or run <code>goimports</code>.</li>
+            <li>Run <code>go mod tidy</code> to update <code>go.mod</code> and <code>go.sum</code>:
+                <pre><code>go mod tidy</code></pre>
+                This records the direct dependency (e.g.
+                <code>require github.com/gin-gonic/gin v1.10.1</code>) plus all its transitive dependencies
+                in <code>go.mod</code>, and writes their checksums into <code>go.sum</code>.
+            </li>
+        </ol>
+
+        <h3>Updating a dependency version</h3>
+        <p>
+            To change the version of an existing dependency, pass the version tag to <code>go get</code>:
+        </p>
+        <pre><code>go get github.com/gin-gonic/gin@v1.10.1   # pin to a specific version
+go get github.com/gin-gonic/gin@latest    # update to the latest released version
+</code></pre>
+        <p>
+            <code>go get</code> updates <code>go.mod</code> immediately. Always follow it with
+            <code>go mod tidy</code> to:
+        </p>
+        <ul>
+            <li>Remove transitive dependencies that the old version used but the new version no longer needs.</li>
+            <li>Add any new transitive dependencies the updated version requires.</li>
+            <li>Refresh the checksums in <code>go.sum</code>.</li>
+        </ul>
+        <pre><code>go get github.com/gin-gonic/gin@latest
+go mod tidy
+</code></pre>
+        <div class="tip">
+            <p>
+                <strong>Rule of thumb:</strong> always run <code>go mod tidy</code> after any
+                <code>go get</code> — whether adding, removing, or updating a dependency — to keep
+                <code>go.mod</code> and <code>go.sum</code> consistent and avoid "unused dependency" or
+                "missing checksum" errors later.
+            </p>
+        </div>
 
         <h3>The <code>init()</code> function</h3>
         <p>Runs automatically before <code>main()</code>; useful for one-off setup.</p>
@@ -206,6 +315,65 @@ msg := fmt.Sprintf("%s is %d", n, a)     // returns formatted string
             <li>Those declared at file level are visible to every function in the same file (and, when capitalised,
                 to other packages too).</li>
         </ul>
+
+        <h3>Exported vs unexported identifiers</h3>
+        <p>
+            In Go, whether an identifier is accessible from another package is determined entirely by its
+            first letter:
+        </p>
+        <ul>
+            <li><strong>Capital first letter</strong> → <strong>exported</strong> (public). Visible to any
+                package that imports this one.</li>
+            <li><strong>Lowercase first letter</strong> → <strong>unexported</strong> (package-private).
+                Only accessible within the same package.</li>
+        </ul>
+        <p>
+            This rule applies uniformly to <em>everything</em>: variables, constants, functions, types,
+            struct fields, and methods.
+        </p>
+        <pre><code>package user
+
+// Exported - accessible from other packages
+type User struct {
+    Name  string // exported field
+    Email string // exported field
+    age   int    // unexported field - only accessible within this package
+}
+
+// Exported constructor
+func NewUser(name, email string, age int) User {
+    return User{Name: name, Email: email, age: age}
+}
+
+// Exported method
+func (u User) Greet() string {
+    return "Hello, " + u.Name
+}
+
+// unexported helper - only usable within this package
+func validate(email string) bool {
+    return len(email) > 0
+}
+</code></pre>
+        <pre><code>package main
+
+import "myapp/user"
+
+func main() {
+    u := user.NewUser("Alice", "alice@example.com", 30)
+    fmt.Println(u.Name)   // OK  - exported field
+    fmt.Println(u.Greet()) // OK  - exported method
+    // fmt.Println(u.age) // ERROR: u.age is unexported (cannot refer to unexported field)
+}
+</code></pre>
+        <div class="tip">
+            <p>
+                <strong>Convention:</strong> constructors follow the pattern <code>NewTypeName</code>
+                (exported) or <code>newTypeName</code> (package-private). Keep fields unexported and
+                expose only what callers genuinely need — this lets you change the internal representation
+                later without breaking any code outside the package.
+            </p>
+        </div>
 
         <h3>Loops</h3>
         <p>Go has only <code>for</code> - no <code>while</code>.</p>
@@ -635,6 +803,16 @@ http.ListenAndServe(":8080", nil)
             <li>One goroutine per incoming request.</li>
             <li>Middleware via wrapping handlers.</li>
         </ul>
+        <div class="tip">
+            <p>
+                <strong>Q: Does <code>net/http</code> need to be installed separately?</strong><br />
+                No. It is part of Go's standard library and is automatically available when Go is installed —
+                no <code>go get</code> required. Other common standard library packages you get for free:
+                <code>fmt</code>, <code>os</code>, <code>strings</code>, <code>time</code>,
+                <code>encoding/json</code>, <code>log/slog</code>, <code>context</code>,
+                <code>errors</code>, <code>sync</code>, <code>crypto/rand</code>.
+            </p>
+        </div>
 
         <h3>Channels in depth</h3>
         <p>
@@ -857,6 +1035,26 @@ func NewService(r Repo) *Service { return &amp;Service{repo: r} }
             We'll walk through it step by step, starting from the smallest possible <code>main.go</code>.
         </p>
 
+        <h3>What is a REST API?</h3>
+        <p>
+            A <strong>REST API</strong> (Representational State Transfer Application Programming Interface)
+            is a way for applications to communicate over HTTP by following REST principles:
+        </p>
+        <ul>
+            <li><strong>Resources</strong> are identified by URLs — e.g. <code>/products</code>,
+                <code>/products/42</code>.</li>
+            <li><strong>Operations</strong> are performed using standard HTTP methods: <code>GET</code>
+                (read), <code>POST</code> (create), <code>PUT</code>/<code>PATCH</code> (update),
+                <code>DELETE</code> (remove).</li>
+            <li><strong>Stateless</strong> — each request contains all the information the server needs to
+                process it; no client session state is stored on the server.</li>
+            <li>Responses are typically <strong>JSON</strong>.</li>
+        </ul>
+        <p>
+            The <code>product-management</code> service we build in this part exposes a REST API over HTTP,
+            using gin as the web framework.
+        </p>
+
         <h3>What is hexagonal architecture? (a 60-second crash course)</h3>
         <p>
             Hexagonal architecture - also called <strong>ports and adapters</strong> - is a way of organising
@@ -930,6 +1128,34 @@ func getProducts(c *gin.Context) {
 }
 </code></pre>
 
+        <p>Let's unpack what each gin call does:</p>
+        <ul>
+            <li><code>gin.Default()</code> — creates an HTTP server pre-configured with two middleware
+                functions: a <strong>logger</strong> (prints every incoming request to stdout) and a
+                <strong>recovery</strong> handler (catches any panic and returns a <code>500</code> response
+                instead of crashing the entire program). Returns a pointer to the engine.</li>
+            <li><code>server.GET("/products", getProducts)</code> — registers <code>getProducts</code> as
+                the handler for all <code>GET /products</code> requests.</li>
+            <li><code>*gin.Context</code> — passed automatically by gin to every handler. Use it to read
+                the request body, headers, and query params, and to write a response.</li>
+            <li><code>context.JSON(http.StatusOK, ...)</code> — serialises the second argument to JSON and
+                writes it to the response with the given HTTP status code.
+                <code>http.StatusOK</code> is the constant <code>200</code> from the standard library's
+                <code>net/http</code> package.</li>
+            <li><code>gin.H</code> — a convenience alias for <code>map[string]any</code>. It lets you
+                return a small ad-hoc JSON object without defining a separate struct.</li>
+            <li><code>server.Run(":8080")</code> — starts listening on port 8080. Calling
+                <code>http://localhost:8080/products</code> now returns
+                <code>{"message":"Hello!"}</code>.</li>
+        </ul>
+        <div class="tip">
+            <p>
+                <strong>Note:</strong> when <code>GIN_MODE=release</code> is set (or
+                <code>gin.SetMode(gin.ReleaseMode)</code> is called in code), gin suppresses the
+                <code>[GIN-debug]</code> route registration lines printed at startup. Those lines only
+                appear in debug mode, which is the default.
+            </p>
+        </div>
         <p>
             That works, but everything is mixed together: routing, business logic, and "data" (a hard-coded
             string). We can't test the logic without spinning up a server, and there's no place to plug in a
@@ -1506,6 +1732,16 @@ go 1.22
             toolchain on the fly.
         </p>
 
+        <div class="tip">
+            <p>
+                <strong>Q: What happens if <code>go.mod</code> says <code>go 1.24.5</code> but the CI/CD
+                pipeline uses <code>golang:1.26.1</code>?</strong><br />
+                The project is built using Go 1.26.1 because the actual compiler version comes from the
+                pipeline environment (the Docker image or CI runner), not from <code>go.mod</code>. The
+                version in <code>go.mod</code> is the <em>minimum</em> required version. Since newer Go
+                versions are backwards compatible, the build succeeds normally.
+            </p>
+        </div>
         <p>That convenience can bite you in two situations:</p>
         <ul>
             <li><strong>You're offline / sandboxed.</strong> If <code>go.mod</code> says <code>go 1.25.0</code>
