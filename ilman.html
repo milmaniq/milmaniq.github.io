@@ -1675,12 +1675,197 @@ Encrypted on disk (AES-256)
     </section>
 
     <section>
+      <h3>Fixing "kubectl Unauthorized" Errors in AKS</h3>
+
+      <p class="problem">❌ Problem</p>
+      <p>
+        I tried to access the AKS cluster using:
+      </p>
+      <pre>
+kubectl get pods -n user-management --cluster &lt;CLUSTER_NAME&gt;
+      </pre>
+      <p>and received:</p>
+      <pre>
+couldn't get current server API group list: the server has asked for the client to provide credentials
+error: You must be logged in to the server (Unauthorized)
+      </pre>
+      <p>
+        This indicated that <code>kubectl</code> was able to reach the Kubernetes API server, but the API
+        server rejected my request because the local credentials had expired or were no longer valid.
+      </p>
+
+      <p class="root-cause">🔎 Investigation</p>
+      <p>
+        The first step was to re-authenticate with Azure. I attempted:
+      </p>
+      <pre>
+az login
+      </pre>
+      <p>
+        However, I was running Azure CLI from WSL. Azure CLI tried to open a Linux browser and failed with:
+      </p>
+      <pre>
+gio: ... Operation not supported
+      </pre>
+      <p>
+        The login itself was not the problem. The issue was only that WSL could not automatically launch a
+        browser.
+      </p>
+
+      <p class="fix">✅ Solution</p>
+      <p>
+        Instead of normal browser authentication, I used device code authentication:
+      </p>
+      <pre>
+az login --use-device-code
+      </pre>
+      <p>
+        Azure displayed a code and a URL. I opened the URL in a browser, entered the code, and completed
+        the login.
+      </p>
+      <p>
+        After successfully logging in to Azure, I refreshed the AKS credentials stored in my kubeconfig:
+      </p>
+      <pre>
+az aks get-credentials \
+  --resource-group &lt;RG_NAME&gt; \
+  --name &lt;CLUSTER_NAME&gt; \
+  --overwrite-existing
+      </pre>
+      <p>
+        This downloaded fresh cluster access credentials and updated the local kubeconfig.
+      </p>
+      <p>
+        After refreshing the credentials, <code>kubectl</code> commands worked again:
+      </p>
+      <pre>
+kubectl get pods -n user-management --cluster &lt;CLUSTER_NAME&gt;
+      </pre>
+
+      <p class="tip">Summary</p>
+      <ol>
+        <li><code>kubectl</code> returned Unauthorized.</li>
+        <li>Azure authentication had expired.</li>
+        <li><code>az login</code> failed because WSL could not launch a browser.</li>
+        <li>Used <code>az login --use-device-code</code>.</li>
+        <li>Refreshed cluster credentials using <code>az aks get-credentials --overwrite-existing</code>.</li>
+        <li><code>kubectl</code> started working again.</li>
+      </ol>
+    </section>
+
+    <section>
       <h3>Docker & Kubernetes Deployment</h3>
       <pre>
 docker build -t user-management-svc:latest .
 k3d image import user-management-svc:latest -c user-management-local
 kubectl rollout restart deployment/user-management-svc -n user-management-app
         </pre>
+    </section>
+
+    <section>
+      <h3>Scanning Container Images with Trivy</h3>
+
+      <p>
+        <strong>Trivy</strong> is an open-source vulnerability scanner from Aqua Security. It inspects
+        container images (and other targets like filesystems, Git repos, and Kubernetes manifests) and
+        reports known security issues — typically CVEs in OS packages and application dependencies
+        bundled inside the image.
+      </p>
+
+      <h4>Why use Trivy?</h4>
+      <ul>
+        <li>
+          <strong>Catch known vulnerabilities before deployment.</strong> A clean build does not mean a
+          safe image — base images and installed packages may carry published CVEs.
+        </li>
+        <li>
+          <strong>Shift-left security.</strong> Run it locally or in CI after <code>docker build</code>
+          and before pushing to a registry, so bad images are blocked early.
+        </li>
+        <li>
+          <strong>Registry-ready images.</strong> Many teams require a Trivy scan (with severity gates)
+          before an image is promoted to staging or production.
+        </li>
+        <li>
+          <strong>Fast, no agent required.</strong> Trivy runs as a standalone CLI or container — useful
+          on a laptop, in CI, or as a one-off check against an image already in ACR.
+        </li>
+      </ul>
+
+      <p>
+        Trivy does <em>not</em> replace runtime protection, secret scanning, or code review. It answers one
+        specific question: <em>"Does this image contain known vulnerabilities in its OS packages or
+        dependencies?"</em>
+      </p>
+
+      <h4>Scan an image from ACR</h4>
+      <p>
+        This runs Trivy in a throwaway Docker container. Mounting <code>/var/run/docker.sock</code> lets
+        Trivy use the local Docker daemon to pull and inspect the target image (or use an image already
+        present locally).
+      </p>
+      <pre>
+docker run --rm \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  aquasec/trivy:latest \
+  image &lt;ACR_NAME&gt;.azurecr.io/&lt;IMAGE_PATH&gt;:&lt;TAG&gt; \
+  --severity MEDIUM,HIGH,CRITICAL \
+  --ignore-unfixed \
+  --format table
+      </pre>
+
+      <p><strong>Example (Curity IAM image):</strong></p>
+      <pre>
+docker run --rm \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  aquasec/trivy:latest \
+  image nxsdvlglb01acr.azurecr.io/nexus/iam:11.1.1 \
+  --severity MEDIUM,HIGH,CRITICAL \
+  --ignore-unfixed \
+  --format table
+      </pre>
+
+      <h4>Flag breakdown</h4>
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Flag / option</th>
+            <th>What it does</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>docker run --rm</code></td>
+            <td>Run Trivy once and remove the container when finished.</td>
+          </tr>
+          <tr>
+            <td><code>-v /var/run/docker.sock:...</code></td>
+            <td>Gives Trivy access to the host Docker daemon so it can pull/inspect images.</td>
+          </tr>
+          <tr>
+            <td><code>image &lt;ref&gt;</code></td>
+            <td>Trivy subcommand: scan a container image (by tag or digest).</td>
+          </tr>
+          <tr>
+            <td><code>--severity MEDIUM,HIGH,CRITICAL</code></td>
+            <td>Only report vulnerabilities at these severity levels — skips LOW and UNKNOWN noise.</td>
+          </tr>
+          <tr>
+            <td><code>--ignore-unfixed</code></td>
+            <td>Hide CVEs that have no upstream fix yet — focuses on issues you can actually patch.</td>
+          </tr>
+          <tr>
+            <td><code>--format table</code></td>
+            <td>Human-readable table output (alternatives: <code>json</code>, <code>sarif</code> for CI).</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p class="tip">
+        Typical workflow: build image → run Trivy → fail CI if CRITICAL/HIGH findings remain → push to
+        ACR only when the scan passes (or when exceptions are documented). Log in to ACR first if the
+        image is private: <code>az acr login --name &lt;ACR_NAME&gt;</code>.
+      </p>
     </section>
 
     <section>
@@ -2017,9 +2202,9 @@ az acr login --name nxsdvlglb01acr
       <h4>Render a Helm Chart with a Custom Values File</h4>
 
       <pre>
-helm template oci://nxsdvlglb01acr.azurecr.io/ifs-pd/ifs-technology-security-nexus-auth/chart/nexus-auth \
+helm template oci://nxsdvlglb01acr.azurecr.io/ifs-pd/&lt;PROJECT_REPO&gt;/chart/nexus-auth \
   --version 0.1.0+69f989d97a0a26d6ba2ca8dd3ecd2ed9c1d5b1bd \
-  --values /mnt/c/dev/projects/ifs-technology-security-nexus-auth/charts/tmp/auth-gateway.values.yaml
+  --values /mnt/c/dev/projects/&lt;PROJECT_REPO&gt;/charts/tmp/auth-gateway.values.yaml
   </pre>
 
       <p>
@@ -3671,6 +3856,216 @@ ilman@IFSCLIENT-01046:~/projects/ifs-technology-security-nexus_user_management_s
       <pre>
 ilman@IFSCLIENT-01046:~/Downloads$ hostname -I
       </pre>
+    </section>
+
+    <section>
+      <h3>Calling a User Management gRPC Endpoint Using grpcurl</h3>
+
+      <p><strong>Objective:</strong> invoke the following gRPC endpoint:</p>
+      <pre>
+user_management.api.v1.SystemService/FindTenantByHost
+      </pre>
+      <p>
+        running in the User Management service inside Kubernetes.
+      </p>
+
+      <h4>Prerequisites — Install grpcurl</h4>
+      <p>
+        <code>grpcurl</code> is a command-line tool for invoking gRPC endpoints. Install it using Go:
+      </p>
+      <pre>
+go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
+      </pre>
+      <p>Ensure the Go binaries are available on PATH:</p>
+      <pre>
+export PATH=$PATH:$(go env GOPATH)/bin
+      </pre>
+      <p>Verify installation:</p>
+      <pre>
+grpcurl --help
+      </pre>
+
+      <h4>Step 1 — Create a Port Forward to the gRPC Service</h4>
+      <p>
+        The gRPC service is running inside the Kubernetes cluster and is not directly accessible from my
+        machine. I first created a port forward so that my local machine could reach the service on
+        <code>localhost:50051</code>:
+      </p>
+      <pre>
+kubectl port-forward \
+  svc/user-management-back \
+  50051:50051 \
+  -n user-management \
+  --cluster &lt;CLUSTER_NAME&gt;
+      </pre>
+      <p>After this command starts successfully:</p>
+      <ul>
+        <li><strong>Local port:</strong> <code>localhost:50051</code></li>
+        <li><strong>Cluster service:</strong> <code>user-management-back:50051</code></li>
+      </ul>
+      <p>
+        Any request sent to <code>localhost:50051</code> is forwarded to the User Management service
+        running inside the cluster. Keep this terminal open while testing the gRPC endpoint.
+      </p>
+
+      <h4>Step 2 — Generate a Service Account Token</h4>
+      <p>
+        The endpoint required authentication. To obtain a token, I generated a Kubernetes service account
+        token:
+      </p>
+      <pre>
+kubectl create token end-user-svc \
+  --context &lt;CLUSTER_NAME&gt; \
+  -n user-management \
+  --audience=k8s \
+  --duration=24h \
+  -o yaml
+      </pre>
+      <p>
+        This produced a JWT token that would later be passed as a Bearer token in the gRPC request.
+      </p>
+
+      <h4>Step 3 — Attempt the gRPC Call</h4>
+      <p>I attempted to call the endpoint using grpcurl:</p>
+      <pre>
+grpcurl -plaintext \
+  -H "authorization: Bearer &lt;TOKEN&gt;" \
+  -d '{"host":"&lt;tenant-host&gt;"}' \
+  localhost:50051 \
+  user_management.api.v1.SystemService/FindTenantByHost
+      </pre>
+      <p>The call failed with:</p>
+      <pre>
+Error invoking method ...
+failed to query for service descriptor ...
+server does not support the reflection API
+      </pre>
+
+      <p class="root-cause">🔎 Understanding the Error</p>
+      <p><code>grpcurl</code> needs to understand:</p>
+      <ul>
+        <li>Available services</li>
+        <li>RPC methods</li>
+        <li>Request message types</li>
+        <li>Response message types</li>
+      </ul>
+      <p>There are two ways <code>grpcurl</code> can obtain this information:</p>
+      <ol>
+        <li>From the gRPC Reflection API exposed by the server.</li>
+        <li>From local protobuf descriptors supplied by the user.</li>
+      </ol>
+      <p>
+        In this case, the User Management gRPC server did not expose the Reflection API. Therefore
+        <code>grpcurl</code> could not discover the service definitions automatically and failed before
+        sending the request.
+      </p>
+
+      <h4>Step 4 — Generate a Protobuf Descriptor Set</h4>
+      <p>
+        Since reflection was unavailable, I supplied <code>grpcurl</code> with a local descriptor set
+        (<code>.protoset</code> file). I navigated to the repository's proto directory:
+      </p>
+      <pre>
+cd ~/projects/&lt;PROJECT_REPO&gt;/cmd/user-management/proto
+      </pre>
+      <p>and generated a descriptor set using Buf:</p>
+      <pre>
+buf build -o ~/user-management.protoset
+      </pre>
+      <p>What happened here:</p>
+      <ul>
+        <li>Buf read all <code>.proto</code> files.</li>
+        <li>Buf compiled the protobuf definitions.</li>
+        <li>Buf generated a descriptor set file named <code>user-management.protoset</code>.</li>
+      </ul>
+      <p>
+        This file contains all service and message definitions required by <code>grpcurl</code>.
+      </p>
+
+      <h4>Step 5 — Retry the Request Using the Protoset</h4>
+      <p>
+        Now <code>grpcurl</code> had enough information to understand the request and service definitions.
+        I re-ran the call:
+      </p>
+      <pre>
+grpcurl -plaintext \
+  -protoset ~/user-management.protoset \
+  -H "authorization: Bearer &lt;TOKEN&gt;" \
+  -d '{"host":"defaultnameincustomerurlifs-kairos-cust-dev.tenants.nxs-dev.ifscsc.cloud"}' \
+  localhost:50051 \
+  user_management.api.v1.SystemService/FindTenantByHost
+      </pre>
+      <p class="fix">✅ This time the request completed successfully.</p>
+
+      <h4>Why It Worked</h4>
+      <p><strong>Initial attempt:</strong></p>
+      <pre>
+grpcurl
+  ↓
+tries reflection
+  ↓
+reflection disabled
+  ↓
+cannot discover service definitions
+  ↓
+request fails
+      </pre>
+      <p><strong>After generating the protoset:</strong></p>
+      <pre>
+grpcurl
+  ↓
+reads user-management.protoset
+  ↓
+understands service definitions locally
+  ↓
+constructs request correctly
+  ↓
+request succeeds
+      </pre>
+
+      <h4>End-to-End Flow</h4>
+      <ol>
+        <li>Install <code>grpcurl</code>.</li>
+        <li>Port-forward the User Management gRPC service to <code>localhost:50051</code>.</li>
+        <li>Generate a Kubernetes service account token.</li>
+        <li>Attempt the gRPC request.</li>
+        <li>Receive: <code>server does not support the reflection API</code>.</li>
+        <li>Generate a descriptor set: <code>buf build -o ~/user-management.protoset</code>.</li>
+        <li>Add <code>-protoset ~/user-management.protoset</code> to the <code>grpcurl</code> command.</li>
+        <li>Re-run the request successfully.</li>
+      </ol>
+
+      <p class="tip">Key Lessons</p>
+      <ul>
+        <li>
+          AKS authentication problems can usually be fixed by re-authenticating with Azure and refreshing
+          cluster credentials.
+        </li>
+        <li>
+          When using Azure CLI from WSL, use <code>az login --use-device-code</code> if browser login
+          fails.
+        </li>
+        <li>
+          A port-forward is required if the gRPC service is only accessible inside the Kubernetes cluster.
+        </li>
+        <li>
+          <code>grpcurl</code> requires either gRPC Reflection enabled on the server, or a local
+          <code>.protoset</code> file.
+        </li>
+        <li>
+          A <code>.protoset</code> file can be generated using:
+          <code>buf build -o user-management.protoset</code>.
+        </li>
+        <li>
+          Service account tokens generated using <code>kubectl create token</code> can be passed as Bearer
+          tokens to authenticated gRPC endpoints.
+        </li>
+        <li>
+          The complete setup for testing a gRPC endpoint from a local machine is:
+          Authenticate to AKS → Port-forward gRPC port → Generate service account token → Generate
+          protoset (if reflection is disabled) → Invoke endpoint using <code>grpcurl</code>.
+        </li>
+      </ul>
     </section>
 
     <section>
