@@ -3186,6 +3186,120 @@ SCIM API
     </section>
 
     <section>
+      <h3>Which Curity Client Should App A Use When Calling App B?</h3>
+
+      <p class="problem">❓ Scenario</p>
+      <p>
+        Imagine two applications — <strong>App A</strong> and <strong>App B</strong> — each registered
+        in Curity as separate OAuth clients (<code>app-a-client</code> and <code>app-b-client</code>).
+        When App A needs to call App B, it must send an access token in the request.
+      </p>
+      <p><strong>Question:</strong> from which client should App A obtain the token?</p>
+
+      <p class="fix">✅ Answer: App A's own client — not App B's client</p>
+      <p>
+        The token should be obtained using <strong>App A's client</strong>
+        (<code>app-a-client</code>), not App B's client (<code>app-b-client</code>).
+      </p>
+
+      <h4>Why?</h4>
+      <p>
+        In OAuth, the client that requests the token is the one that authenticates to the
+        authorization server. The token represents <em>who is calling</em>, not <em>who is being
+        called</em>.
+      </p>
+      <pre>
+App A  --->  Curity  --->  gets access token
+  |
+  +---- calls App B with that token
+      </pre>
+
+      <h4>Client Credentials Flow (machine-to-machine)</h4>
+      <p>Typical setup for service-to-service communication:</p>
+      <ul>
+        <li><strong>Client:</strong> <code>app-a-client</code></li>
+        <li><strong>Grant type:</strong> <code>client_credentials</code></li>
+        <li><strong>Audience / scope:</strong> <code>app-b-api</code></li>
+      </ul>
+
+      <pre>
+App A
+  |
+  | Authenticate as app-a-client
+  v
+Curity
+  |
+  | Issues token
+  | sub = app-a-client
+  | scope = app-b-api
+  v
+Access Token
+  |
+  v
+App B
+      </pre>
+
+      <h4>What should App B validate?</h4>
+      <p>App B should validate that:</p>
+      <ul>
+        <li><strong>Issuer</strong> = Curity</li>
+        <li><strong>Audience</strong> = <code>app-b-api</code> (or <code>app-b</code>)</li>
+        <li><strong>Scope</strong> contains the required permissions</li>
+      </ul>
+      <p>…and then authorize the operation.</p>
+
+      <h4>What NOT to do</h4>
+      <p class="problem">❌ App A should not use <code>app-b-client</code> credentials</p>
+      <p>That would mean:</p>
+      <pre>
+App A pretends to be App B
+      </pre>
+      <p>
+        Curity would issue a token representing App B, making it impossible to know the real caller.
+      </p>
+
+      <h4>Real-world analogy</h4>
+      <p>Think of:</p>
+      <ul>
+        <li><code>app-a-client</code> = service account of App A</li>
+        <li><code>app-b-client</code> = service account of App B</li>
+      </ul>
+      <p>
+        When App A calls App B, <strong>App A logs in as itself</strong> — not as App B.
+      </p>
+
+      <h4>Example</h4>
+      <p>Suppose:</p>
+      <ul>
+        <li><strong>Client A:</strong> <code>inventory-service</code></li>
+        <li><strong>Client B:</strong> <code>order-service</code></li>
+      </ul>
+      <p>Inventory calls Order:</p>
+      <pre>
+POST /oauth-token
+
+client_id=inventory-service
+client_secret=...
+grant_type=client_credentials
+scope=order-api
+      </pre>
+      <p>Curity issues:</p>
+      <pre>
+{
+  "client_id": "inventory-service",
+  "scope": "order-api"
+}
+      </pre>
+      <p>Inventory sends this token to Order Service.</p>
+
+      <p class="tip">
+        <strong>Rule of thumb:</strong> the calling application always gets the token using its
+        <em>own</em> client credentials and requests scopes / audience that allow access to the
+        target API.
+      </p>
+    </section>
+
+    <section>
       <h3>Basic Auth Token vs OAuth2 Token</h3>
 
       <table style="border-collapse:collapse;width:100%">
