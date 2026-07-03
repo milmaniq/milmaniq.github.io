@@ -628,10 +628,13 @@ google.golang.org/genproto/googleapis/rpc/status
 (main module does not need module google.golang.org/genproto)
 </code></pre>
         <p>
-            Translation: nothing in your current build imports it. It may still appear in
-            <code>go.sum</code> from an old <code>go get</code> — that is normal and does not mean it is
-            active today. Run <code>go mod tidy</code> to clean up <code>go.mod</code>; stale
-            <code>go.sum</code> lines often linger until the next resolution touches them.
+            Translation: nothing in your current build imports it. So why might you still see that module
+            name elsewhere? It can be a leftover checksum line in <code>go.sum</code> (module level) or
+            <code>go.work.sum</code> (workspace level) from an earlier <code>go get</code> or build — that
+            is normal and does not mean the module is active today. Run <code>go mod tidy</code> to clean up
+            the module's <code>go.mod</code> and <code>go.sum</code>; in workspace mode,
+            <code>go work sync</code> can refresh <code>go.work.sum</code> too. Even then, old checksum
+            lines in either file may stick around harmlessly.
         </p>
 
         <h4>Key takeaways — the cheat sheet</h4>
