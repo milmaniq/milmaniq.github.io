@@ -30,7 +30,7 @@
                 }
             },
             "datePublished": "2026-05-16",
-            "dateModified": "2026-05-16",
+            "dateModified": "2026-07-03",
             "description": "A two-part Go tutorial: Part 1 covers all the Go fundamentals (packages, modules, slices, maps, goroutines, channels, sync, context, http), and Part 2 walks through building a product-management microservice using hexagonal architecture, CQRS, interfaces, gin, zerolog, uuid, and uber/fx for dependency injection.",
             "keywords": "Go, Golang, Hexagonal Architecture, Ports and Adapters, CQRS, uber/fx, fx.Provide, fx.Invoke, gin, zerolog, uuid, goroutines, channels, mutex, context, dependency injection, beginner Go tutorial",
             "mainEntityOfPage": {
@@ -108,9 +108,12 @@
                 <code>go get</code> only adds the package if it isn't already present, or locks it to the
                 version you explicitly specify. Downloaded modules are stored in the module cache at
                 <code>$GOPATH/pkg/mod</code> (check with <code>go env GOPATH</code>).</li>
-            <li><code>go mod download</code> - downloads everything listed in <code>go.mod</code> into the module cache
-                (<code>$GOPATH/pkg/mod</code>) without changing <code>go.mod</code> or <code>go.sum</code>. It verifies
-                downloads against <code>go.sum</code> and fails on a checksum mismatch.</li>
+            <li><code>go mod download</code> - pre-downloads dependencies into the module cache
+                (<code>$GOPATH/pkg/mod</code>) without changing <code>go.mod</code> or <code>go.sum</code>.
+                <strong>What to download</strong> comes from <code>go.mod</code>; <strong>whether the download
+                is trustworthy</strong> is checked against <code>go.sum</code> (and <code>go.work.sum</code>
+                in workspace mode). Run it inside one module directory — it does not fetch dependencies for
+                every module listed in <code>go.work</code>.</li>
             <li><code>go mod tidy</code> - synchronises module files with your code:
                 <ul>
                     <li>adds dependencies imported in code but missing from <code>go.mod</code>;</li>
@@ -127,6 +130,13 @@
             </li>
             <li><code>go env</code> - shows Go env vars (<code>GOPATH</code>, <code>GOROOT</code>, etc.).</li>
             <li><code>go list -m all</code> - lists every module the project depends on.</li>
+            <li><code>go work sync</code> - after the workspace picks shared dependency versions, writes that
+                choice into <strong>every</strong> module's <code>go.mod</code>. Does <em>not</em> run
+                automatically after <code>go get</code> — see
+                <a href="#go-workspaces">Go workspaces</a> below.</li>
+            <li><code>go mod why -m &lt;module&gt;</code> - answers:
+                <em>"Who is pulling this dependency into my dependency graph?"</em>
+                (e.g. <code>go mod why -m google.golang.org/grpc</code>).</li>
         </ul>
 
         <h3>Go executables</h3>
@@ -176,23 +186,47 @@ go 1.26.1
         </p>
         <div class="tip">
             <p>
-                <strong>Monorepo pattern:</strong> a single Git repository can host multiple Go modules,
-                each with its own <code>go.mod</code>. The module name for each follows the repository path
-                plus the subfolder — e.g. <code>github.com/myorg/myrepo/service-a</code> and
-                <code>github.com/myorg/myrepo/service-b</code> — keeping import paths unique across the
-                whole repository.
+                <strong>Monorepo pattern:</strong> one Git repo, many Go modules — each with its own
+                <code>go.mod</code>. Name each module after its path in the repo, e.g.
+                <code>github.com/myorg/myrepo/service-a</code> and
+                <code>github.com/myorg/myrepo/service-b</code>, so import paths stay unique.
+            </p>
+            <p>
+                When <code>service-a</code> imports packages from <code>service-b</code>, Go normally
+                resolves that import by downloading <code>service-b</code> from the remote URL in its
+                <code>go.mod</code> (e.g. GitHub) — even if both folders sit side by side on your machine.
+                A root <code>go.work</code> file tells Go: <em>use the local copies in this repo instead</em>.
+                That lets you change <code>service-a</code> and <code>service-b</code> together, run
+                <code>go build</code> / <code>go test</code>, and see the effect immediately — without
+                pushing commits, tagging a release, or running <code>go get</code> against the remote for
+                every local edit. See <a href="#go-workspaces">Go workspaces</a> below.
             </p>
         </div>
 
         <h3><code>go.mod</code> vs <code>go.sum</code></h3>
+        <p>
+            Two files, two jobs — easy to mix up after a year away from Go modules:
+        </p>
         <ul>
-            <li><code>go.mod</code> - contains which versions of dependencies your module uses (similar to
-                <code>pom.xml</code> in Maven projects).
-            </li>
-            <li><code>go.sum</code> - contains checksums for all dependencies listed in <code>go.mod</code>.
-                A <strong>checksum</strong> is a hash of a file or data that ensures data integrity; in Go modules,
-                it verifies that downloaded dependencies haven't been tampered with.</li>
+            <li><code>go.mod</code> — <strong>the shopping list.</strong> It says which dependencies (and
+                which versions) this module needs. A dependency can be <strong>direct</strong> (your code
+                imports it) or <strong>indirect</strong> (another dependency imports it for you).</li>
+            <li><code>go.sum</code> — <strong>the integrity stamps.</strong> It stores checksums so Go can
+                verify that downloaded code has not been tampered with. It does <em>not</em> decide which
+                version to use — that always comes from <code>go.mod</code>.</li>
         </ul>
+        <div class="tip">
+            <p>
+                <strong>Remember this:</strong> seeing a module in <code>go.sum</code> does <em>not</em> mean
+                your project still uses it. <code>go.sum</code> is more like a log of modules Go has
+                downloaded or checked in the past. For example,
+                <code>google.golang.org/genproto v0.0.0-20210226172003-ab064af71705</code> can sit in
+                <code>go.sum</code> long after nothing in your code needs it anymore.
+                <br /><br />
+                <strong>One line to keep:</strong> <code>go.mod</code> = what we need;
+                <code>go.sum</code> = checksums for things Go has seen.
+            </p>
+        </div>
 
         <h4>Indirect (transitive) dependencies</h4>
         <p>
@@ -268,6 +302,356 @@ go mod tidy
                 "missing checksum" errors later.
             </p>
         </div>
+
+        <h3 id="go-workspaces">Go workspaces, dependency trees, and resolution</h3>
+        <p>
+            If you work in a monorepo with many services, read this section once and bookmark it — it saves
+            hours when a <code>go get</code> fails with a cryptic import error six months later.
+        </p>
+        <p>
+            In a monorepo, each service or library has its own pair of files:
+        </p>
+        <pre><code>cmd/iam-config-management/
+    go.mod    ← what this service needs
+    go.sum    ← checksums for this service
+</code></pre>
+        <p>
+            A single module's <code>go.mod</code> might say:
+        </p>
+        <pre><code>require (
+    google.golang.org/grpc v1.75.0
+)
+</code></pre>
+        <p>
+            Translation: "this module needs grpc v1.75.0." Versions always come from
+            <code>go.mod</code>; <code>go.sum</code> only checks that what was downloaded matches what
+            was expected.
+        </p>
+
+        <h4>What is <code>go.work</code>?</h4>
+        <p>
+            <code>go.work</code> is <strong>not</strong> another dependency file. It is a list of modules
+            you want Go to treat as one big project while you develop locally:
+        </p>
+        <pre><code>use (
+    ./cmd/access-studio
+    ./cmd/auth-gateway
+    ./cmd/iam-config-management
+    ./cmd/user-management
+    ...
+)
+</code></pre>
+        <p>
+            <strong>Without <code>go.work</code>:</strong> each module resolves its dependencies on its own.
+            <code>iam-config-management</code> does not care what <code>auth-gateway</code> uses.
+        </p>
+        <p>
+            <strong>With <code>go.work</code>:</strong> Go looks at <em>all</em> listed modules together and
+            picks versions that satisfy everyone at once. That is useful when services share libraries, but
+            it also means a problem in one service can block a <code>go get</code> in another.
+        </p>
+        <p>
+            To <strong>add a module to the workspace</strong>, run <code>go work use</code> with the module's
+            path (relative to the repo root). This updates <code>go.work</code> — it does not add
+            dependencies; those still live in each module's own <code>go.mod</code>:
+        </p>
+        <pre><code>go work use ./cmd/auth-gateway      # add auth-gateway to the workspace
+go work use ./cmd/user-management   # add user-management to the workspace
+</code></pre>
+        <p>
+            Run these from the directory that contains <code>go.work</code> (usually the repo root).
+        </p>
+
+        <h4>What is a dependency tree?</h4>
+        <p>
+            You import one package; Go pulls in everything that package needs, and everything <em>those</em>
+            packages need, and so on. That chain is the dependency tree:
+        </p>
+        <pre><code>iam-config-management
+    └── grpc                          ← you asked for this
+          ├── protobuf                ← grpc asked for this
+          │     └── x/sys             ← protobuf asked for this
+          ├── genproto                ← grpc asked for this
+          └── x/net                   ← grpc asked for this
+</code></pre>
+        <p>
+            You may never write <code>import "google.golang.org/genproto/..."</code> in your code, yet
+            <code>genproto</code> still shows up — because grpc (or something else) depends on it.
+            When a scanner (e.g. Trivy) flags a module you do not recognise, ask:
+            <em>"Who is pulling this in?"</em> — that is exactly what <code>go mod why -m</code> is for
+            (covered below).
+        </p>
+
+        <h4>Case study: upgrading grpc in a workspace</h4>
+        <p>
+            Real monorepo scenario. The symptom was simple; the cause was workspace-wide.
+        </p>
+        <p>
+            <strong>Step 1 — the failure.</strong> From inside the module you are upgrading
+            (<code>cmd/iam-config-management</code>):
+        </p>
+        <pre><code>cd cmd/iam-config-management
+go get google.golang.org/grpc@v1.79.3
+</code></pre>
+        <p>
+            You might expect <code>go get</code> to affect only the module you are standing in. It does
+            not — not when a <code>go.work</code> file exists higher up in the folder tree. Here is the
+            layout:
+        </p>
+        <pre><code>my-monorepo/
+├── go.work                          ← workspace file (repo root)
+├── cmd/
+│   ├── auth-gateway/
+│   │   └── go.mod
+│   └── iam-config-management/       ← you ran `go get` from here
+│       └── go.mod
+</code></pre>
+        <p>
+            When you run <code>go get</code> inside <code>cmd/iam-config-management</code>, Go does not
+            stop at that folder. It checks the current directory for a <code>go.work</code> file, then the
+            parent directory, then the parent of that, and so on until it finds one or reaches the filesystem
+            root. In this repo it finds <code>my-monorepo/go.work</code> — so <strong>workspace mode turns
+            on automatically</strong>, even though your shell was inside a subfolder.
+        </p>
+        <p>
+            With workspace mode on, Go does not upgrade <code>iam-config-management</code> in isolation. It
+            tries to pick dependency versions that work for <strong>all</strong> modules listed in
+            <code>go.work</code> at the same time — as if the whole monorepo were one big project.
+        </p>
+        <p>
+            In this case, that is what went wrong:
+        </p>
+        <ul>
+            <li><code>iam-config-management</code> wanted grpc v1.79.3, which needs the new split
+                <code>genproto/googleapis/rpc</code> module.</li>
+            <li><code>auth-gateway</code> (a different service you were not even touching) still depended on
+                the old monolithic <code>genproto</code> module.</li>
+        </ul>
+        <p>
+            Go could not satisfy both at once — the same import path existed in two different modules. So
+            your <code>go get</code> failed inside <code>iam-config-management</code> even though that
+            module alone was perfectly fine (which is exactly what <code>GOWORK=off</code> proved in
+            Step 2).
+        </p>
+        <p>
+            Go reported this as an <strong>ambiguous import</strong> for
+            <code>google.golang.org/genproto/googleapis/rpc/status</code> — that package path was claimed by
+            both the old monolithic <code>genproto</code> module and the newer split
+            <code>genproto/googleapis/rpc</code> module. With <code>go.work</code> active, Go had to pick one
+            answer for the entire workspace and could not.
+        </p>
+        <p><strong>Step 2 — isolate the blame.</strong> Still in <code>cmd/iam-config-management</code>,
+            turn off workspace mode for one command:</p>
+        <pre><code>GOWORK=off go get google.golang.org/grpc@v1.79.3
+</code></pre>
+        <p>
+            This succeeded. So <code>cmd/iam-config-management</code> alone was fine; the conflict came
+            from another module in the workspace graph. <code>GOWORK=off</code> means:
+            <em>"Ignore <code>go.work</code> for this command; resolve only the module I am standing in."</em>
+        </p>
+        <p><strong>Step 3 — the fix.</strong> Still from <code>cmd/iam-config-management</code>, with
+            workspace mode back on (no <code>GOWORK=off</code>). Two commands, two different jobs:</p>
+
+        <p><strong>3a — fix the root cause.</strong> Upgrade the stale genproto chain across the workspace:</p>
+        <pre><code>go get google.golang.org/genproto@latest
+</code></pre>
+        <p>
+            This is the command that actually <strong>solved the problem</strong>. It moved
+            <code>genproto</code>, <code>genproto/googleapis/api</code>,
+            <code>genproto/googleapis/rpc</code>, protobuf, and related modules to versions compatible with
+            each other. The old monolithic <code>genproto</code> was replaced by the split modules, so the
+            ambiguous import went away.
+        </p>
+
+        <p><strong>3b — set the grpc version you wanted.</strong> Now the workspace graph was healthy enough
+            to accept the grpc upgrade (or downgrade) you originally tried:</p>
+        <pre><code>go get google.golang.org/grpc@v1.79.3
+</code></pre>
+        <p>
+            This command had failed in Step 1. After Step 3a, it succeeded — it updated
+            <code>google.golang.org/grpc</code> to v1.79.3 (and any grpc-related modules the resolver
+            needed) without hitting the genproto conflict again.
+        </p>
+        <div class="tip">
+            <p>
+                <strong>Debugging recipe:</strong> workspace <code>go get</code> fails → try
+                <code>GOWORK=off go get ...</code> in the module you care about. If that works, the bug is
+                in the workspace graph, not in your module alone.
+            </p>
+        </div>
+
+        <h4><code>go.work.sum</code></h4>
+        <p>
+            Workspace mode adds a second checksum file beside <code>go.work</code>. Same rule as
+            <code>go.sum</code>: it verifies downloads; it does not choose versions.
+        </p>
+        <table class="table" style="max-width:800px;">
+            <thead>
+                <tr>
+                    <th>File</th>
+                    <th>Plain English</th>
+                    <th>Decides versions?</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>go.mod</code></td>
+                    <td>What this one module needs</td>
+                    <td><strong>Yes</strong></td>
+                </tr>
+                <tr>
+                    <td><code>go.sum</code></td>
+                    <td>Checksums for this one module</td>
+                    <td>No — verify only</td>
+                </tr>
+                <tr>
+                    <td><code>go.work</code></td>
+                    <td>Which modules belong to the workspace</td>
+                    <td>No — list only</td>
+                </tr>
+                <tr>
+                    <td><code>go.work.sum</code></td>
+                    <td>Extra checksums the workspace needed that no single module's <code>go.sum</code> had</td>
+                    <td>No — verify only</td>
+                </tr>
+            </tbody>
+        </table>
+        <p>
+            Go maintains <code>go.work.sum</code> automatically when you run <code>go build</code>,
+            <code>go test</code>, <code>go mod download</code>, <code>go get</code>, or
+            <code>go work sync</code> in workspace mode. Do not edit it by hand.
+        </p>
+        <p>
+            <strong>Commit it to git.</strong> That way every developer and every CI run checks downloaded
+            modules against the same checksums. If you delete <code>go.work.sum</code>, Go will create a new
+            one the next time someone runs a workspace command — but until that happens, different machines
+            may verify dependencies slightly differently, so builds are less predictable across the team.
+        </p>
+        <p>
+            <strong>Do not assume every line in <code>go.work.sum</code> is a dependency you still
+            use.</strong> Same rule as <code>go.sum</code>: the file can keep checksum lines for modules Go
+            downloaded or checked in the past. Your project may have moved on, but the old line can stick
+            around — that is normal and harmless. Run <code>go mod tidy</code> in a module to clean up that
+            module's <code>go.mod</code> and <code>go.sum</code>. In workspace mode,
+            <code>go work sync</code> or a later <code>go get</code> / <code>go build</code> can refresh
+            <code>go.work.sum</code> as well. Even after that, some old checksum lines may still be there;
+            that does not mean those modules are active dependencies today.
+        </p>
+
+        <h4>What does <code>go work sync</code> do?</h4>
+        <p>
+            Imagine three services asking for different grpc versions. The workspace resolver picks one
+            version that works for everyone. <code>go work sync</code> writes that shared choice back into
+            <strong>every</strong> module's <code>go.mod</code> so the files match what the workspace actually
+            uses.
+        </p>
+        <p>Before sync:</p>
+        <ul>
+            <li><code>cmd/auth-gateway</code> → grpc v1.75.0</li>
+            <li><code>cmd/user-management</code> → grpc v1.75.0</li>
+            <li><code>cmd/iam-config-management</code> → grpc v1.79.3</li>
+        </ul>
+        <p>
+            Workspace resolves grpc to v1.79.3. After <code>go work sync</code>, the first two modules'
+            <code>go.mod</code> files are updated to v1.79.3 as well.
+        </p>
+        <p>
+            <strong>Does <code>go get</code> run <code>go work sync</code> for you? No.</strong> They are
+            separate commands:
+        </p>
+        <ul>
+            <li><code>go get</code> — updates the <code>go.mod</code> of the module you are standing in
+                (the "main module" for that command). In workspace mode, Go still considers the whole
+                workspace when <em>choosing</em> versions, but <code>go get</code> only <em>writes</em> to
+                that one module's <code>go.mod</code>.</li>
+            <li><code>go work sync</code> — reads the workspace's combined build list and writes the
+                selected versions back into <strong>all</strong> modules listed in <code>go.work</code>.</li>
+        </ul>
+        <p>
+            So after a workspace <code>go get</code>, other services' <code>go.mod</code> files may still
+            show older versions until you run <code>go work sync</code> yourself. Run it when you want every
+            module's <code>go.mod</code> to match what the workspace resolver selected — for example after
+            bulk upgrades or before committing dependency changes across the monorepo.
+        </p>
+
+        <h4>Cloning, downloading, and <code>go mod download</code></h4>
+        <p>
+            <strong>After <code>git clone</code>, you have source code — not dependencies.</strong> Just run
+            <code>go build</code>, <code>go test</code>, or <code>go run</code> as usual; the first command
+            fetches whatever is missing. You do not need <code>go mod download</code> first.
+        </p>
+        <p>
+            <code>go mod download</code> is the same kind of fetch, but upfront — handy in CI, on build
+            agents, or before going offline. When it runs, <code>go.mod</code> decides
+            <strong>what</strong> to download; <code>go.sum</code> (and <code>go.work.sum</code> in workspace
+            mode) checks <strong>whether the download is trustworthy</strong>.
+        </p>
+        <p>
+            Run <code>go mod download</code> inside <code>cmd/iam-config-management</code> and you get that module's dependencies only —
+            not the whole monorepo. There is no single "download everything in <code>go.work</code>" command.
+            To cover a workspace, either loop <code>go mod download</code> in each <code>cmd/*</code>
+            directory, or run <code>go test ./...</code> / <code>go build ./...</code> from the root and let
+            Go fetch along the way.
+        </p>
+
+        <h4><code>go mod why -m</code> — who is pulling this in?</h4>
+        <p>
+            The question this command answers:
+            <strong><em>"Who is pulling this dependency into my dependency graph?"</em></strong>
+        </p>
+        <p>Use it when:</p>
+        <ul>
+            <li>a dependency shows up in <code>go list -m all</code> and you did not add it yourself;</li>
+            <li>a security scanner flags a module you do not recognise;</li>
+            <li>you want to remove a dependency but need to find the import chain first;</li>
+            <li>you are debugging a version conflict like the genproto case above.</li>
+        </ul>
+        <pre><code>go mod why -m google.golang.org/genproto/googleapis/rpc
+</code></pre>
+        <p>Example output:</p>
+        <pre><code># google.golang.org/genproto/googleapis/rpc
+cmd/auth-gateway/generated/api/v1
+google.golang.org/genproto/googleapis/rpc/status
+</code></pre>
+        <p>Read it bottom-up as a chain:</p>
+        <ol>
+            <li><code>cmd/auth-gateway/generated/api/v1</code> imports
+                <code>google.golang.org/genproto/googleapis/rpc/status</code></li>
+            <li>that package lives in the module <code>google.golang.org/genproto/googleapis/rpc</code></li>
+        </ol>
+        <p>
+            So auth-gateway's generated API code is the answer to "who is pulling this in?" — not grpc, not
+            your hand-written handler, but that generated package.
+        </p>
+        <p>When the module is <em>not</em> actually needed, you may see:</p>
+        <pre><code># google.golang.org/genproto
+(main module does not need module google.golang.org/genproto)
+</code></pre>
+        <p>
+            Translation: nothing in your current build imports it. It may still appear in
+            <code>go.sum</code> from an old <code>go get</code> — that is normal and does not mean it is
+            active today. Run <code>go mod tidy</code> to clean up <code>go.mod</code>; stale
+            <code>go.sum</code> lines often linger until the next resolution touches them.
+        </p>
+
+        <h4>Key takeaways — the cheat sheet</h4>
+        <ul>
+            <li><code>go.mod</code> = shopping list (versions). <code>go.sum</code> = integrity stamps (not
+                versions).</li>
+            <li><code>go.work</code> = which modules develop together. <code>go.work.sum</code> = extra
+                integrity stamps for the workspace.</li>
+            <li>Workspace mode = Go resolves <em>all</em> listed modules as one graph. A conflict in any
+                module can block a <code>go get</code> anywhere in the repo.</li>
+            <li><code>GOWORK=off</code> = "ignore <code>go.work</code> for this one command."</li>
+            <li><code>go work sync</code> = write the workspace's chosen versions back into each
+                <code>go.mod</code>. Not run automatically by <code>go get</code> — run it yourself when
+                you want all modules aligned.</li>
+            <li><code>go mod why -m</code> = <em>"Who is pulling this dependency into my dependency
+                graph?"</em></li>
+            <li><code>git clone</code> does not download Go modules — the first build, test, or run does.</li>
+            <li>Version conflicts (genproto vs grpc) are fixed by upgrading the stale part of the graph —
+                not by editing <code>go.sum</code> or <code>go.work.sum</code>.</li>
+        </ul>
 
         <h3>The <code>init()</code> function</h3>
         <p>Runs automatically before <code>main()</code>; useful for one-off setup.</p>
