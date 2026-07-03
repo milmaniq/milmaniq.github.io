@@ -517,9 +517,48 @@ go get google.golang.org/grpc@v1.79.3
             </tbody>
         </table>
         <p>
-            Go maintains <code>go.work.sum</code> automatically when you run <code>go build</code>,
-            <code>go test</code>, <code>go mod download</code>, <code>go get</code>, or
-            <code>go work sync</code> in workspace mode. Do not edit it by hand.
+            Go maintains <code>go.work.sum</code> automatically in workspace mode. Which file each command
+            touches:
+        </p>
+        <table class="table" style="max-width:800px;">
+            <thead>
+                <tr>
+                    <th>Command</th>
+                    <th>Module-level (<code>go.mod</code> / <code>go.sum</code>)</th>
+                    <th>Workspace-level (<code>go.work.sum</code>)</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>go mod tidy</code></td>
+                    <td>Yes — cleans the module you are standing in</td>
+                    <td>No</td>
+                </tr>
+                <tr>
+                    <td><code>go get</code></td>
+                    <td>Yes — updates that module's <code>go.mod</code></td>
+                    <td>Can add checksums if workspace resolution needs them</td>
+                </tr>
+                <tr>
+                    <td><code>go mod download</code></td>
+                    <td>Yes — reads that module's <code>go.mod</code>, verifies against its <code>go.sum</code></td>
+                    <td>Can add checksums if workspace resolution needs them</td>
+                </tr>
+                <tr>
+                    <td><code>go build</code> / <code>go test</code> / <code>go run</code></td>
+                    <td>May update <code>go.mod</code> / <code>go.sum</code> when resolving imports</td>
+                    <td>Can add checksums if workspace resolution needs them</td>
+                </tr>
+                <tr>
+                    <td><code>go work sync</code></td>
+                    <td>Yes — rewrites every workspace module's <code>go.mod</code></td>
+                    <td>Yes — may refresh <code>go.work.sum</code></td>
+                </tr>
+            </tbody>
+        </table>
+        <p>
+            <code>go.work.sum</code> only stores checksums that the workspace needs but that are not already
+            recorded in any individual module's <code>go.sum</code>. Do not edit it by hand.
         </p>
         <p>
             <strong>Commit it to git.</strong> That way every developer and every CI run checks downloaded
@@ -529,13 +568,17 @@ go get google.golang.org/grpc@v1.79.3
         </p>
         <p>
             <strong>Do not assume every line in <code>go.work.sum</code> is a dependency you still
-            use.</strong> Same rule as <code>go.sum</code>: the file can keep checksum lines for modules Go
+            use.</strong> Same rule as <code>go.sum</code>: both files can keep checksum lines for modules Go
             downloaded or checked in the past. Your project may have moved on, but the old line can stick
-            around — that is normal and harmless. Run <code>go mod tidy</code> in a module to clean up that
-            module's <code>go.mod</code> and <code>go.sum</code>. In workspace mode,
-            <code>go work sync</code> or a later <code>go get</code> / <code>go build</code> can refresh
-            <code>go.work.sum</code> as well. Even after that, some old checksum lines may still be there;
-            that does not mean those modules are active dependencies today.
+            around — that is normal and harmless.
+        </p>
+        <p>
+            To clean up: run <code>go mod tidy</code> inside a module to fix that module's
+            <code>go.mod</code> and <code>go.sum</code> (this does <em>not</em> touch
+            <code>go.work.sum</code>). For workspace-wide alignment, run <code>go work sync</code>. Build
+            and test commands can refresh <code>go.work.sum</code> too. Even after all of that, stale
+            checksum lines in either sum file may remain — that does not mean those modules are active
+            dependencies today.
         </p>
 
         <h4>What does <code>go work sync</code> do?</h4>
