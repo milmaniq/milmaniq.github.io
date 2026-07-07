@@ -1763,6 +1763,81 @@ kubectl rollout restart deployment/user-management-svc -n user-management-app
     </section>
 
     <section>
+      <h3>Container Security & Registry Concepts</h3>
+
+      <h4>RapidFort</h4>
+      <p>
+        <strong>RapidFort</strong> is a container security platform that provides hardened container images with
+        significantly reduced vulnerabilities (CVEs). Instead of developers using standard public images from Docker
+        Hub, they can use RapidFort's optimized and secured images.
+      </p>
+
+      <h4>FedRAMP</h4>
+      <p>
+        <strong>FedRAMP</strong> (Federal Risk and Authorization Management Program) is a U.S. government security
+        compliance framework for cloud services. It provides a standardized approach to security assessment and
+        authorization for cloud systems used by federal agencies.
+        (<a href="https://www.fedramp.gov">fedramp.gov</a>)
+      </p>
+      <p>FedRAMP requires strong controls around:</p>
+      <ul>
+        <li>Vulnerability management</li>
+        <li>Encryption</li>
+        <li>Auditing</li>
+        <li>Access control</li>
+      </ul>
+      <p>
+        RapidFort markets its curated images as helping organizations achieve FedRAMP readiness because the images
+        are already hardened and maintained with security requirements in mind.
+      </p>
+
+      <h4>RF Curated Images</h4>
+      <p>
+        <strong>RF Curated</strong> stands for RapidFort Curated Images. These are container images that RapidFort
+        has:
+      </p>
+      <ul>
+        <li>
+          <strong>Hardened</strong> — hardened images can have their shells (<code>bash</code>, <code>sh</code>) and
+          compilers (<code>gcc</code>, <code>make</code>, etc.) removed, and vulnerabilities patched
+        </li>
+        <li><strong>Optimized</strong></li>
+        <li><strong>Scanned for vulnerabilities</strong></li>
+        <li><strong>Continuously rebuilt and maintained</strong></li>
+        <li><strong>Prepared for compliance requirements</strong> such as FedRAMP and FIPS</li>
+      </ul>
+
+      <h4>ACR</h4>
+      <p>
+        <strong>Azure Container Registry (ACR)</strong> is Microsoft's private Docker image registry service.
+        Example: <code>mycompany.azurecr.io</code>
+      </p>
+      <p>
+        Similar to Docker Hub, Quay.io, and Harbor, but hosted in Azure and managed by your organization.
+      </p>
+
+      <h4>Mirroring</h4>
+      <p>
+        <strong>Mirroring</strong> means copying images from one registry to another registry.
+      </p>
+      <p><strong>Example:</strong></p>
+      <ul>
+        <li>Source registry: <code>quay.io/rfcurated/nginx:latest</code></li>
+        <li>Destination registry (ACR): <code>mycompany.azurecr.io/rfcurated/nginx:latest</code></li>
+      </ul>
+      <p>
+        The image contents remain the same; it is simply duplicated into your company's registry. Reasons for
+        mirroring:
+      </p>
+      <ul>
+        <li>Better availability</li>
+        <li>Security control</li>
+        <li>Compliance requirements</li>
+        <li>Internal image governance</li>
+      </ul>
+    </section>
+
+    <section>
       <h3>Scanning Container Images with Trivy</h3>
 
       <p>
