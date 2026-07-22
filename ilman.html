@@ -1143,6 +1143,167 @@ if err := scimSourceState.CanProvision(s.clock.NowUTC()); err != nil {
     </section>
 
     <section>
+      <h3>Domain-Driven Design (DDD) — Upstream vs Downstream Contexts</h3>
+
+      <h4>Definitions</h4>
+
+      <p><strong>Upstream Context</strong></p>
+      <ul>
+        <li>Provides data or capabilities that other contexts depend on.</li>
+        <li>Usually the source of truth for the data it owns.</li>
+      </ul>
+
+      <p><strong>Downstream Context</strong></p>
+      <ul>
+        <li>Consumes data or capabilities from another context.</li>
+        <li>Depends on the upstream context.</li>
+      </ul>
+
+      <p><strong>Important:</strong></p>
+      <p>
+        Upstream/Downstream is determined by ownership and dependency,
+        <strong>NOT</strong> by who makes the API call.
+      </p>
+
+      <h4>Architectural Principle</h4>
+      <p>
+        An upstream context should ideally know as little as possible about its consumers.
+      </p>
+
+      <p class="fix">✅ Following the Principle (Good)</p>
+      <ul>
+        <li>Access Studio exposes generic APIs or publishes generic events.</li>
+        <li>User Management, ServiceNow, Reporting, etc. consume them.</li>
+        <li>New consumers can be added without changing Access Studio.</li>
+        <li>Access Studio remains independent and loosely coupled.</li>
+      </ul>
+
+      <p class="problem">❌ Not Following the Principle (Bad)</p>
+      <ul>
+        <li>Access Studio contains consumer-specific logic.</li>
+        <li>Access Studio must know details about its consumers.</li>
+        <li>Every new consumer requires changes to Access Studio.</li>
+        <li>This creates tight coupling and makes the system harder to evolve independently.</li>
+      </ul>
+
+      <h4>Pull vs Push</h4>
+      <p>
+        The choice is usually <strong>NOT</strong> based on upstream vs downstream.
+      </p>
+
+      <p><strong>Choose Pull When</strong></p>
+      <ul>
+        <li>The downstream decides when it needs data.</li>
+        <li>Data changes infrequently.</li>
+        <li>Slight staleness is acceptable.</li>
+        <li>Multiple consumers exist.</li>
+        <li>The upstream should remain simple and loosely coupled.</li>
+      </ul>
+
+      <p><strong>Example:</strong></p>
+      <pre>
+User Management ---&gt; Access Studio API
+      </pre>
+
+      <p><strong>Advantages:</strong></p>
+      <ul>
+        <li>Low coupling.</li>
+        <li>Upstream does not need to know consumers.</li>
+        <li>Easy to add new consumers (if the service is running in multiple regions).</li>
+      </ul>
+
+      <p><strong>Choose Push When</strong></p>
+      <ul>
+        <li>Data must be updated immediately.</li>
+        <li>Event-driven architecture is preferred.</li>
+        <li>Consumers must react to changes as they happen.</li>
+        <li>Polling would be inefficient.</li>
+      </ul>
+
+      <p><strong>Example:</strong></p>
+      <pre>
+Access Studio ---&gt; User Management
+      </pre>
+
+      <h4>Push and DDD Considerations</h4>
+      <p>Not all push mechanisms are equal.</p>
+
+      <p class="problem">❌ Direct Webhook Push (Tightly Coupled)</p>
+      <pre>
+Access Studio
+     |
+     +--&gt; User Management Webhook
+     +--&gt; ServiceNow Webhook
+     +--&gt; Audit Webhook
+      </pre>
+
+      <p><strong>Problems:</strong></p>
+      <ul>
+        <li>Access Studio must know consumer endpoints.</li>
+        <li>Access Studio must manage authentication.</li>
+        <li>Access Studio must handle retries/failures.</li>
+        <li>Every new consumer requires configuration or code changes.</li>
+      </ul>
+      <p>
+        This increases coupling and goes against the DDD principle that an upstream context should know as
+        little as possible about downstream contexts.
+      </p>
+
+      <p class="fix">✅ Event Publishing (Loosely Coupled)</p>
+      <pre>
+Access Studio
+      |
+      v
+ Event Broker
+(Kafka, Azure Service Bus, Event Grid, etc.)
+      |
+      +--&gt; User Management
+      +--&gt; ServiceNow
+      +--&gt; Audit
+      </pre>
+
+      <p><strong>Advantages:</strong></p>
+      <ul>
+        <li>Access Studio publishes events only.</li>
+        <li>Access Studio does not know who consumes the events.</li>
+        <li>New consumers can subscribe without changing Access Studio.</li>
+        <li>Supports near real-time synchronization while preserving loose coupling.</li>
+      </ul>
+
+      <p><strong>Examples of Events:</strong></p>
+      <ul>
+        <li><code>UserCreated</code></li>
+        <li><code>UserUpdated</code></li>
+        <li><code>GroupUpdated</code></li>
+        <li><code>AccessAssigned</code></li>
+      </ul>
+
+      <h4>Rule of Thumb</h4>
+      <ul>
+        <li>If the downstream needs data on its own schedule, use Pull.</li>
+        <li>If the downstream must react immediately to changes, use Push.</li>
+        <li>Use event publishing instead of consumer-specific webhooks whenever feasible.</li>
+      </ul>
+
+      <h4>Common Pattern</h4>
+      <pre>
+Access Studio
+    |
+    +--&gt; APIs (Pull for queries/full sync)
+    |
+    +--&gt; Events (Push for real-time updates)
+      </pre>
+
+      <p>
+        Many modern systems use both:
+      </p>
+      <ul>
+        <li>Pull APIs for reconciliation and on-demand access.</li>
+        <li>Events for near real-time updates.</li>
+      </ul>
+    </section>
+
+    <section>
       <h3>Test-Driven Development (TDD)</h3>
 
       <p>
@@ -1672,6 +1833,94 @@ Encrypted on disk (AES-256)
         💡 Although a dedicated cluster has higher cost, it significantly reduces these risks and is the
         safer approach.
       </p>
+    </section>
+
+    <section>
+      <h3>Azure Subscription Hierarchy</h3>
+
+      <pre>
+Azure Subscription
+│
+├── Resource Group (folder/container)          // Logical container used by Azure to organize related resources
+│
+│   ├── AKS Cluster                            // Kubernetes environment where applications run
+│   │   │
+│   │   ├── Kubernetes Control Plane           // Brain of the cluster; manages scheduling, state, and cluster operations
+│   │   │
+│   │   ├── Node Pool                          // Group of worker nodes with the same configuration
+│   │   │   │
+│   │   │   ├── VM (Node)                      // Worker machine that runs Kubernetes workloads
+│   │   │   ├── VM (Node)                      // Worker machine that runs Kubernetes workloads
+│   │   │   └── VM (Node)                      // Worker machine that runs Kubernetes workloads
+│   │   │
+│   │   └── Namespace                          // Logical boundary used to organize and isolate resources
+│   │       ├── Pods                           // Running application containers
+│   │       ├── Services                       // Networking and service discovery for pods
+│   │       └── Deployments                    // Manages pod lifecycle, scaling, and updates
+│   │
+│   ├── Storage Accounts                       // Stores blobs, files, queues, and tables
+│   ├── Key Vaults                             // Stores secrets, certificates, and encryption keys
+│   ├── Public IPs                             // Publicly accessible IP addresses
+│   └── Other Azure Resources                  // Databases, App Services, Managed Identities, etc.
+│
+└── Another Resource Group                     // Separate container for another set of Azure resources
+    ├── AKS Cluster
+    └── Other Azure Resources
+      </pre>
+    </section>
+
+    <section>
+      <h3>Request Flow — User Management via Azure Front Door</h3>
+
+      <p>
+        Example URL:
+        <code>https://testauto24r1-in2.tenants.nxs-dev.ifscsc.cloud/user-management</code>
+      </p>
+
+      <ol>
+        <li>
+          User sends a request to:
+          <code>testauto24r1-in2.tenants.nxs-dev.ifscsc.cloud/user-management</code>
+        </li>
+        <li>The request first reaches Azure Front Door (AFD).</li>
+        <li>
+          AFD evaluates its profiles and matches the request domain.
+          <ul>
+            <li>Profile: <code>nxs-dev-tenants-glb-profile</code></li>
+            <li>Domain match: <code>*.tenants.nxs-dev.ifscsc.cloud</code></li>
+          </ul>
+        </li>
+        <li>
+          After the domain is matched, AFD evaluates the Ruleset associated with the profile.
+          <ul>
+            <li>Rules are evaluated in order.</li>
+            <li>Each Ruleset can contain a maximum of 10 rules.</li>
+            <li>The matching rule determines which Origin Group should handle the request.</li>
+          </ul>
+        </li>
+        <li>
+          The selected Origin Group forwards the request to its configured Origin Host Name.
+          <ul>
+            <li>Example Origin Group: <code>stp-eu1</code></li>
+            <li>Origin Host Name: <code>nxs-dev-euno-01-comm01-app01.nxs-dev.ifscsc.cloud</code></li>
+          </ul>
+        </li>
+        <li>While forwarding the request, AFD keeps the Origin Host Header unchanged.</li>
+        <li>The Origin Host Name points to the APISIX ingress running in the <code>apisix</code> namespace.</li>
+        <li>The APISIX ingress routes the request to the APISIX Gateway.</li>
+        <li>
+          The APISIX Gateway applies its routing rules and forwards the request to the ingress in the
+          <code>user-management</code> namespace.
+        </li>
+        <li>
+          The User Management ingress forwards the request to the Kubernetes service:
+          <code>user-management-back</code>
+        </li>
+        <li>
+          The <code>user-management-back</code> service routes the request to one of the User Management
+          application pods.
+        </li>
+      </ol>
     </section>
 
     <section>
@@ -3030,6 +3279,65 @@ Authorization: Bearer eyJ...
       </ul>
       <p>The resulting access token represents: <em>the authenticated client application
         itself.</em></p>
+    </section>
+
+    <section>
+      <h3>PKCE and State Parameter Flow</h3>
+
+      <ol>
+        <li>
+          When initiating the authorization request, the application generates:
+          <ul>
+            <li>A <strong>code verifier</strong> — a random secret known only to the client.</li>
+            <li>A <strong>code challenge</strong> — a SHA-256 hash of the code verifier.</li>
+          </ul>
+        </li>
+        <li>
+          The authorization request sent to the Authorization Server contains:
+          <ul>
+            <li><code>state</code></li>
+            <li><code>code_challenge</code></li>
+            <li><code>code_challenge_method=S256</code></li>
+          </ul>
+        </li>
+        <li>
+          The <code>state</code> parameter is used to carry information that is needed after the user
+          returns from authentication. In our implementation, the state contains:
+          <ul>
+            <li>The original redirect URL (where the user should be sent after login).</li>
+            <li>The code verifier (needed later for the token exchange).</li>
+          </ul>
+          These values are encoded into the state parameter and sent with the authorize request.
+        </li>
+        <li>
+          After the user successfully authenticates, the Authorization Server redirects the user back to
+          the callback endpoint with:
+          <ul>
+            <li><code>code</code></li>
+            <li><code>state</code></li>
+          </ul>
+        </li>
+        <li>
+          The application decodes the returned state value and retrieves:
+          <ul>
+            <li>The original code verifier.</li>
+            <li>The original redirect URL.</li>
+          </ul>
+        </li>
+        <li>
+          During the authorization code to token exchange, the application sends:
+          <ul>
+            <li>The authorization code received in the callback.</li>
+            <li>The recovered code verifier.</li>
+          </ul>
+          The Authorization Server hashes the supplied code verifier and compares it with the previously
+          received code challenge. If they match, token issuance is allowed.
+        </li>
+        <li>
+          After successful token exchange and session creation, the application redirects the user to the
+          redirect URL that was stored in the state parameter.
+        </li>
+      </ol>
     </section>
 
     <section>

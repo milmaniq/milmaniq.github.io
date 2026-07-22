@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description"
+    content="Learn what Prometheus is, how to expose Gin, gRPC, log, and Go runtime metrics from a Go service, and how to run Prometheus locally with Docker Compose to scrape and query them." />
+  <meta name="keywords"
+    content="Prometheus, Go, Gin, gRPC, metrics, observability, monitoring, Docker Compose, go-gin-prometheus, go-grpc-prometheus, time series, alerting" />
+  <meta name="author" content="Ilman Iqbal" />
+  <title>Prometheus — What It Is? Exposing and Scraping Go Service Metrics</title>
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Article",
+      "headline": "Prometheus — What It Is? Exposing and Scraping Go Service Metrics",
+      "author": {
+        "@type": "Person",
+        "name": "Ilman Iqbal",
+        "url": "https://www.linkedin.com/in/ilman-iqbal-096308172"
+      },
+      "publisher": {
+        "@type": "Organization",
+        "name": "Ilman Iqbal",
+        "url": "https://ilmaniqbal.com",
+        "logo": {
+          "@type": "ImageObject",
+          "url": "https://ilmaniqbal.com/img/logo.png"
+        }
+      },
+      "datePublished": "2026-07-22",
+      "dateModified": "2026-07-22",
+      "description": "Prometheus is a time-series database that pulls metrics from your Go service. This guide covers Gin, gRPC, log, and runtime metrics, then walks through running Prometheus locally with Docker Compose.",
+      "articleSection": [
+        "Prometheus fundamentals",
+        "Step 1 — Configuring the application to expose metrics",
+        "Step 2 — Configuring Prometheus to scrape and store metrics",
+        "To run Prometheus locally",
+        "To run Prometheus in cluster"
+      ],
+      "inLanguage": "en",
+      "keywords": "Prometheus, Go, Gin, gRPC, metrics, observability, monitoring, Docker Compose, go-gin-prometheus, go-grpc-prometheus",
+      "mainEntityOfPage": {
+        "@type": "WebPage",
+        "@id": "https://ilmaniqbal.com/prometheus-metrics-monitoring-go-services.html"
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+Pro&display=swap" rel="stylesheet" />
+  <link href="css/bootstrap.min.css" rel="stylesheet">
+  <link href="css/blog.css" rel="stylesheet">
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-8PPCHX9PDV"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag() { dataLayer.push(arguments); }
+    gtag('js', new Date());
+    gtag('config', 'G-8PPCHX9PDV');
+  </script>
+</head>
+
+<body>
+  <div class="container">
+
+    <header class="site-header">
+      <a href="index.html" class="site-logo-wrapper" style="text-decoration: none; color: inherit;">
+        <div class="site-logo"><i class="fas fa-code fa-2x"></i></div>
+        <h1>Ilman Iqbal's Blog</h1>
+      </a>
+    </header>
+
+    <h2 class="tm-post-title">Prometheus — What It Is? Exposing and Scraping Go Service Metrics</h2>
+    <p class="meta">Jul 22, 2026 posted by Ilman Iqbal</p>
+
+    <p>
+      Prometheus is a time-series database that collects metrics from your apps. It does not run inside your Go service.
+      Your service only exposes numbers; Prometheus pulls them on a schedule.
+    </p>
+
+    <pre><code>Your Go service                    Prometheus
+┌─────────────────┐               ┌─────────────────┐
+│  Gin / gRPC     │               │  Scrapes every  │
+│  /metrics       │ ◄── pull ──── │  10 seconds     │
+│  (counters,     │               │  Stores history │
+│   histograms)   │               │  Evaluates rules│
+└─────────────────┘               └─────────────────┘</code></pre>
+
+    <table>
+      <tr>
+        <th>Without Prometheus</th>
+        <th>With Prometheus</th>
+      </tr>
+      <tr>
+        <td>Your app knows "I got 42 requests" right now</td>
+        <td>Prometheus stores that number every 10 seconds</td>
+      </tr>
+      <tr>
+        <td>You can only see current state via <code>curl /metrics</code></td>
+        <td>You can see trends: "requests went up at 3pm"</td>
+      </tr>
+      <tr>
+        <td>No alerts</td>
+        <td>"CPU &gt; 80% for 10 minutes → alert"</td>
+      </tr>
+    </table>
+
+    <h3>Step 1 — Configuring the application to expose metrics</h3>
+    <p>
+      Your Go app uses libraries that register metrics and expose them at <code>GET /metrics</code> on the HTTP port.
+    </p>
+
+    <p class="note">
+      In Gin, Prometheus middleware only applies to routes registered <em>after</em> it. Therefore, ensure that the
+      Prometheus middleware is registered before registering any routes to the Gin engine.
+    </p>
+
+    <table>
+      <tr>
+        <th>What</th>
+        <th>Library</th>
+        <th>Example metric</th>
+      </tr>
+      <tr>
+        <td>HTTP (Gin)</td>
+        <td>go-gin-prometheus</td>
+        <td><code>gin_requests_total</code>, <code>gin_request_duration_seconds_*</code></td>
+      </tr>
+      <tr>
+        <td>gRPC server</td>
+        <td>go-grpc-prometheus</td>
+        <td><code>grpc_server_handled_total</code></td>
+      </tr>
+      <tr>
+        <td>gRPC client (gateway)</td>
+        <td>go-grpc-prometheus</td>
+        <td><code>grpc_client_handled_total</code></td>
+      </tr>
+      <tr>
+        <td>Logs</td>
+        <td>shared logger</td>
+        <td><code>log_messages_total{log.level="info"}</code></td>
+      </tr>
+      <tr>
+        <td>Go runtime</td>
+        <td>built-in</td>
+        <td><code>process_cpu_seconds_total</code>, <code>process_*</code>, <code>go_memstats_*</code></td>
+      </tr>
+    </table>
+
+    <h4>Registering <code>gin_*</code> metrics</h4>
+    <p>
+      <strong>What it tracks:</strong> Every HTTP request and response that passes through the Gin engine — including
+      <code>/healthz</code>, <code>/v1/*</code> (REST via gRPC-Gateway), and 404/405 responses.
+    </p>
+
+    <pre><code>import ginprometheus "github.com/zsais/go-gin-prometheus"
+
+func NewHandler(logger logging.Logger, cfg *config.Config, redisClient *redis.Client, lis net.Listener) http.Handler {
+    engine := gin.New()
+
+    once.Do(func() {
+        prom = ginprometheus.NewPrometheus("gin")
+    })
+    if prom != nil {
+        prom.Use(engine)
+    }
+
+    // Routes must be registered AFTER prom.Use() so middleware applies to them.
+    endpointsHealth(engine, redisClient)
+    endpointsGRPCGateway(engine, lis)
+}</code></pre>
+
+    <div class="note">
+      <p><strong>PS:</strong> <code>prom.Use(engine)</code> does two things:</p>
+      <ol>
+        <li>Adds middleware that counts every HTTP request (<code>gin_requests_total</code>,
+          <code>gin_request_duration_seconds_*</code>, etc.)
+        </li>
+        <li>Registers <code>GET /metrics</code> endpoint on the Gin engine so it is accessible over the HTTP port</li>
+      </ol>
+    </div>
+
+    <table>
+      <tr>
+        <th>Metric</th>
+        <th>Meaning</th>
+      </tr>
+      <tr>
+        <td><code>gin_requests_total</code></td>
+        <td>HTTP request count, partitioned by status code, method, handler, host, and URL</td>
+      </tr>
+      <tr>
+        <td><code>gin_request_duration_seconds_*</code></td>
+        <td>HTTP request latency (histogram)</td>
+      </tr>
+      <tr>
+        <td><code>gin_request_size_bytes</code></td>
+        <td>Approximate request body size</td>
+      </tr>
+      <tr>
+        <td><code>gin_response_size_bytes</code></td>
+        <td>Response body size</td>
+      </tr>
+    </table>
+
+    <p>Example <code>/metrics</code> response for Gin metrics:</p>
+    <pre><code>gin_requests_total{code="200",method="GET",url="/healthz",host="localhost:8080"} 10
+gin_requests_total{code="404",method="GET",url="/favicon.ico",host="localhost:8080"} 1</code></pre>
+
+    <h4>Registering <code>grpc_server_*</code> metrics</h4>
+    <p>
+      <strong>What it tracks:</strong> RPCs handled by the gRPC server on port 50051 (e.g. RPC methods called directly
+      over gRPC, or via the gRPC-Gateway). Metrics are recorded after the RPC completes, so they include information on
+      the response as well.
+    </p>
+
+    <pre><code>grpcServer = grpc.NewServer(
+    grpc.ChainUnaryInterceptor(
+        grpcprometheus.UnaryServerInterceptor,  // record each RPC (timing, status, method)
+        authInterceptor.UnaryInterceptor(),
+    ),
+    grpc.ChainStreamInterceptor(
+        grpcprometheus.StreamServerInterceptor,
+    ),
+)
+v1.RegisterLookupServiceServer(grpcServer, lookupServer)
+grpcprometheus.Register(grpcServer)  // registers collectors and enables handling-time histograms</code></pre>
+
+    <table>
+      <tr>
+        <th>Metric</th>
+        <th>Meaning</th>
+      </tr>
+      <tr>
+        <td><code>grpc_server_handled_total</code></td>
+        <td>RPC count by service, method, and gRPC status (OK, Unauthenticated, …)</td>
+      </tr>
+      <tr>
+        <td><code>grpc_server_handling_seconds_*</code></td>
+        <td>RPC latency histogram</td>
+      </tr>
+      <tr>
+        <td><code>grpc_server_msg_received_total</code></td>
+        <td>Protobuf messages received per RPC</td>
+      </tr>
+      <tr>
+        <td><code>grpc_server_msg_sent_total</code></td>
+        <td>Protobuf messages sent per RPC</td>
+      </tr>
+    </table>
+
+    <p><strong>Use case:</strong> Monitor RPC calls, latency, auth failures, and errors on the gRPC server.</p>
+
+    <h4>Registering <code>grpc_client_*</code> metrics</h4>
+    <p>
+      <strong>What it tracks:</strong> gRPC calls made by gRPC-Gateway when REST clients hit the HTTP server. The
+      gateway translates HTTP into an internal gRPC call to send to the local gRPC server. Metrics are recorded after
+      the RPC completes, so they include information on the response as well.
+    </p>
+
+    <pre><code>opts := []grpc.DialOption{
+    grpc.WithTransportCredentials(insecure.NewCredentials()),
+    grpc.WithChainUnaryInterceptor(grpcprometheus.UnaryClientInterceptor),
+    grpc.WithChainStreamInterceptor(grpcprometheus.StreamClientInterceptor),
+}
+// gateway dials local gRPC server using these opts
+gw.RegisterLookupServiceHandlerFromEndpoint(ctx, gwmux, lis.Addr().String(), opts)</code></pre>
+
+    <table>
+      <tr>
+        <th>Metric</th>
+        <th>Meaning</th>
+      </tr>
+      <tr>
+        <td><code>grpc_client_started_total</code></td>
+        <td>Outbound RPC attempts started</td>
+      </tr>
+      <tr>
+        <td><code>grpc_client_handled_total</code></td>
+        <td>Outbound RPC count by service, method, and status</td>
+      </tr>
+      <tr>
+        <td><code>grpc_client_handling_seconds_*</code></td>
+        <td>Latency of the internal gateway→gRPC hop</td>
+      </tr>
+      <tr>
+        <td><code>grpc_client_msg_received_total</code></td>
+        <td>Messages received on the client side</td>
+      </tr>
+      <tr>
+        <td><code>grpc_client_msg_sent_total</code></td>
+        <td>Messages sent on the client side</td>
+      </tr>
+    </table>
+
+    <p><strong>Use case:</strong> Detect slowness or failures in the HTTP→gRPC translation layer.</p>
+
+    <h4>Registering <code>log_messages_total</code> metrics</h4>
+    <p>
+      <strong>What it tracks:</strong> Total log lines emitted by the app, partitioned by log level.
+    </p>
+
+    <pre><code>import "github.com/prometheus/client_golang/prometheus"
+
+var (
+    once     sync.Once
+    instance logging.Logger
+)
+func Singleton(cfg Config, writers ...io.Writer) logging.Logger {
+    once.Do(func() {
+        instance = New(cfg, writers...)
+        prometheus.MustRegister(logCounter)
+    })
+    return instance
+}</code></pre>
+
+    <table>
+      <tr>
+        <th>Metric</th>
+        <th>Meaning</th>
+      </tr>
+      <tr>
+        <td><code>log_messages_total{log.level="info"}</code></td>
+        <td>Info-level log lines</td>
+      </tr>
+      <tr>
+        <td><code>log_messages_total{log.level="error"}</code></td>
+        <td>Error-level log lines</td>
+      </tr>
+      <tr>
+        <td><code>log_messages_total{log.level="debug"}</code></td>
+        <td>Debug-level log lines</td>
+      </tr>
+    </table>
+
+    <p><strong>Use case:</strong> Alert on error log spikes (e.g.
+      <code>log_messages_total{log.level="error"} &gt; 100</code>).
+    </p>
+
+    <h4>Go runtime metrics (built-in)</h4>
+    <p>
+      <strong>What it tracks:</strong> Process health — automatically registered by the Prometheus Go client library.
+    </p>
+
+    <table>
+      <tr>
+        <th>Metric</th>
+        <th>Meaning</th>
+      </tr>
+      <tr>
+        <td><code>process_cpu_seconds_total</code></td>
+        <td>Total CPU time consumed by the process</td>
+      </tr>
+      <tr>
+        <td><code>process_open_fds</code></td>
+        <td>Number of open file descriptors</td>
+      </tr>
+      <tr>
+        <td><code>process_resident_memory_bytes</code></td>
+        <td>Resident memory size</td>
+      </tr>
+      <tr>
+        <td><code>go_memstats_*</code></td>
+        <td>Go heap, GC, and allocation stats</td>
+      </tr>
+      <tr>
+        <td><code>go_gc_duration_seconds_*</code></td>
+        <td>Garbage collection pause times</td>
+      </tr>
+    </table>
+
+    <p><strong>Use case:</strong> Alert on CPU/memory spikes.</p>
+
+    <h3>Step 2 — Configuring Prometheus to scrape and store metrics</h3>
+    <p>
+      Once Step 1 is done and <code>GET /metrics</code> is serving data, Prometheus needs to pull those values on a
+      schedule and store them as time series. How you set that up depends on where Prometheus runs:
+    </p>
+    <ul>
+      <li><strong>Locally</strong> — you run Prometheus in Docker Compose and point it at your service with
+        <code>prometheus.yml</code>.</li>
+      <li><strong>In cluster</strong> — the shared cluster Prometheus discovers your pod via annotations; no per-service
+        <code>prometheus.yml</code> in the deployment.</li>
+    </ul>
+    <p>
+      There are commonly three types of metrics Prometheus stores:
+    </p>
+    <ul>
+      <li><strong>Counter</strong> — only increases (<code>gin_requests_total</code>)</li>
+      <li><strong>Histogram</strong> — latency distribution (<code>gin_request_duration_seconds_bucket</code>)</li>
+      <li><strong>Gauge</strong> — goes up and down (<code>process_open_fds</code>, memory)</li>
+    </ul>
+
+    <p class="note">
+      Use <code>rate(...[1m])</code> for "per second" on counters, e.g.
+      <code>rate(gin_requests_total[1m])</code>.
+    </p>
+
+    <h4>To run Prometheus locally</h4>
+
+    <p><strong>1. Start your service on a port</strong> (e.g. 8082).</p>
+
+    <p><strong>2. Create <code>telemetry/prometheus/iam-config-management/prometheus.yml</code></strong> with the
+      following content:</p>
+    <pre><code>scrape_configs:
+  - job_name: 'iam-config-management'       # job name in Prometheus
+    scrape_interval: 10s                    # scrape interval defined here
+    static_configs:
+      - targets: ['host.docker.internal:8082']  # lets the Prometheus container reach a process on your host (WSL/Linux)
+
+rule_files:
+  - alerts-cpu.yaml
+  - alerts-fds.yaml
+  - alerts-logger.yaml
+  - alerts-memory.yaml
+  - alerts-status.yaml</code></pre>
+
+    <p><strong>3. Create <code>telemetry/prometheus/docker-compose.yml</code></strong> as shown below:</p>
+    <pre><code>services:
+  prometheus:
+    image: prom/prometheus:v3.0.1
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./iam-config-management:/etc/prometheus   # must contain prometheus.yml from step 2
+    extra_hosts:
+      # Prometheus runs inside Docker. From inside the container, localhost means the container itself — not your WSL/host where go run is listening.
+      # host-gateway is a Docker Compose special value: it automatically uses the host's gateway IP (the IP the container uses to reach the host).
+      # This adds an entry to the container's /etc/hosts file that allows the container to resolve host.docker.internal to the host's gateway IP.
+      # prometheus.yml says: targets: ['host.docker.internal:8082']. Prometheus resolves host.docker.internal to the host machine.
+      - "host.docker.internal:host-gateway"
+    command:
+      - "--log.level=debug"
+      - "--config.file=/etc/prometheus/prometheus.yml"</code></pre>
+
+    <p><strong>4. Start Prometheus</strong></p>
+    <pre><code>cd telemetry/prometheus
+docker compose up</code></pre>
+
+    <p><strong>5. Open the UI</strong> at <a href="http://localhost:9090" target="_blank"
+        rel="noopener">http://localhost:9090</a>.</p>
+
+    <p><strong>6. Verify scraping</strong> by navigating to <strong>Status → Target health</strong>. Find the job called
+      <code>iam-config-management</code>. State should be <strong>UP</strong>. If <strong>DOWN</strong>:
+    </p>
+    <ul>
+      <li>Service not running on 8082</li>
+      <li>Wrong target in <code>prometheus.yml</code> (try <code>172.17.0.1:8082</code> or your WSL IP)</li>
+      <li>Firewall blocking the port</li>
+    </ul>
+
+    <p><strong>7. Run queries in Prometheus.</strong> Go to Graph (or Query in newer UI) and try:</p>
+    <pre><code># Total HTTP requests
+gin_requests_total
+
+# HTTP requests per second
+rate(gin_requests_total[1m])
+
+# gRPC calls handled
+grpc_server_handled_total
+
+# Log messages by level
+log_messages_total
+
+# CPU usage
+rate(process_cpu_seconds_total[1m])
+
+# Memory (MB)
+go_memstats_sys_bytes / 1024 / 1024</code></pre>
+
+    <p><strong>8. Generate traffic and watch values change.</strong> Hammer the <code>/healthz</code> endpoint:</p>
+    <pre><code>for i in $(seq 1 20); do curl -s http://localhost:8082/healthz > /dev/null; done</code></pre>
+    <p>
+      In Prometheus, re-run <code>gin_requests_total</code> or <code>rate(gin_requests_total[1m])</code> — numbers
+      should move.
+    </p>
+
+    <p><strong>9. Stop everything</strong></p>
+    <pre><code>cd telemetry/prometheus
+docker compose down</code></pre>
+
+    <p class="note">
+      You have also defined alerts in <code>prometheus.yml</code>. In the Prometheus UI, you'll see Alert rules and
+      whether they're firing. Locally they usually stay green unless you stress the service.
+    </p>
+
+    <h4>To run Prometheus in cluster</h4>
+    <p>
+      In the cluster, the shared cluster Prometheus discovers targets automatically from pod annotations — there is no
+      per-service <code>prometheus.yml</code> in the deployment.
+    </p>
+    <p>
+      Helm stamps the following annotations on each pod. They are <strong>required</strong> for in-cluster Prometheus
+      to find and scrape your service:
+    </p>
+    <pre><code>metadata:
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/path: /metrics
+    prometheus.io/port: "8082"</code></pre>
+
+    <table>
+      <tr>
+        <th>Annotation</th>
+        <th>Meaning</th>
+      </tr>
+      <tr>
+        <td><code>prometheus.io/scrape</code></td>
+        <td>Tells the cluster Prometheus to scrape this pod</td>
+      </tr>
+      <tr>
+        <td><code>prometheus.io/path</code></td>
+        <td>Metrics endpoint path exposed by the Gin HTTP server</td>
+      </tr>
+      <tr>
+        <td><code>prometheus.io/port</code></td>
+        <td>HTTP port where <code>/metrics</code> is served (not the gRPC port)</td>
+      </tr>
+    </table>
+
+    <p>
+      The cluster Prometheus operator reads these annotations, builds scrape targets, and pulls metrics on its own
+      schedule — the same counters and histograms you verified locally, now stored with labels like
+      <code>app</code> and <code>cluster</code>.
+    </p>
+
+    <h4>Note on Grafana when running locally</h4>
+    <p>
+      The cluster Prometheus will scrape metrics together with labels like <code>app</code> and <code>cluster</code>,
+      which enables the Grafana dashboard to display panels based on these labels. As local Prometheus will scrape
+      without those labels, panels in the local Grafana dashboard may look empty. Therefore, use Prometheus Graph for
+      local debugging; use Grafana mainly against cluster Prometheus.
+    </p>
+
+  </div>
+</body>
+
+</html>
