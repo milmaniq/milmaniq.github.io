@@ -15,23 +15,29 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	httpadapter "cmd/product-management/adapters/in/http"
-	"cmd/product-management/adapters/out/memory"
+	"cmd/product-management/adapters/out/inmemory"
+	mongoadapter "cmd/product-management/adapters/out/mongo"
 	"cmd/product-management/application"
-	"cmd/product-management/domain/product"
+	"cmd/product-management/application/ports"
+	product "cmd/product-management/domain"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxevent"
 )
 
 const (
-	httpAddr        = ":8080"
-	shutdownTimeout = 5 * time.Second
+	httpAddr            = ":8080"
+	shutdownTimeout     = 5 * time.Second
+	mongoConnectTimeout = 10 * time.Second
+	defaultMongoURI     = "mongodb://localhost:27017"
 )
 
 // uuidIDs is the production implementation of application.IDGenerator,
@@ -53,14 +59,67 @@ func newLogger() zerolog.Logger {
 
 // asIDGenerator exposes the concrete uuidIDs as the application.IDGenerator
 // port. Doing it here means the application package never imports uuid.
-func asIDGenerator() application.IDGenerator { return uuidIDs{} }
+func asIDGenerator() ports.IDGenerator { return uuidIDs{} }
 
-// asWriter and asReader expose the same in-memory repository instance
-// under the two CQRS port interfaces. fx caches values by type, so
-// memory.NewProductRepository runs exactly once and both wrappers see
-// the same *memory.ProductRepository.
-func asWriter(r *memory.ProductRepository) application.ProductWriter { return r }
-func asReader(r *memory.ProductRepository) application.ProductReader { return r }
+func productRepositoryKind() string {
+	switch strings.ToLower(os.Getenv("PRODUCT_REPOSITORY")) {
+	case "memory":
+		return "memory"
+	default:
+		return "mongo"
+	}
+}
+
+func mongoURI() string {
+	if uri := os.Getenv("MONGO_URI"); uri != "" {
+		return uri
+	}
+	return defaultMongoURI
+}
+
+func newMongoClient(lc fx.Lifecycle, logger zerolog.Logger) (*mongo.Client, error) {
+	connectCtx, cancel := context.WithTimeout(context.Background(), mongoConnectTimeout)
+	defer cancel()
+
+	client, err := mongoadapter.Connect(connectCtx, mongoURI())
+	if err != nil {
+		return nil, err
+	}
+
+	lc.Append(fx.Hook{
+		OnStop: func(ctx context.Context) error {
+			if err := mongoadapter.Disconnect(ctx, client); err != nil {
+				return err
+			}
+			logger.Info().Msg("mongo client disconnected")
+			return nil
+		},
+	})
+
+	logger.Info().
+		Str("uri", mongoURI()).
+		Str("database", "product_management").
+		Str("collection", "products").
+		Msg("mongo client connected")
+	return client, nil
+}
+
+func newProductRepository(
+	lc fx.Lifecycle,
+	logger zerolog.Logger,
+) (ports.ProductRepository, error) {
+	switch productRepositoryKind() {
+	case "memory":
+		logger.Info().Msg("using in-memory product repository")
+		return inmemory.NewProductRepository(), nil
+	default:
+		client, err := newMongoClient(lc, logger)
+		if err != nil {
+			return nil, err
+		}
+		return mongoadapter.NewProductRepository(client), nil
+	}
+}
 
 // newHTTPHandler builds the gin engine and exposes it as http.Handler so
 // the composition root can wrap it in *http.Server for graceful shutdown.
@@ -131,15 +190,12 @@ func appOptions(overrides ...fx.Option) []fx.Option {
 			newLogger,
 			asIDGenerator,
 
-			// Outbound adapter: in-memory repository, exposed under both
-			// CQRS port interfaces.
-			memory.NewProductRepository,
-			asWriter,
-			asReader,
+			// Outbound adapter: mongo (default) or in-memory via PRODUCT_REPOSITORY=memory.
+			newProductRepository,
 
 			// Application services (use cases)
-			application.NewCommandService,
-			application.NewQueryService,
+			application.NewProductCommandService,
+			application.NewProductQueryService,
 
 			// Inbound HTTP adapter
 			httpadapter.NewHandler,

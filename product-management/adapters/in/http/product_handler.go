@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"cmd/product-management/application"
-	"cmd/product-management/domain/product"
+	product "cmd/product-management/domain"
 
 	"github.com/gin-gonic/gin"
 )

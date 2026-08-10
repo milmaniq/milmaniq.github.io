@@ -1,7 +1,7 @@
 // Package http is the inbound adapter that exposes the application
-// layer over HTTP. It depends on application.{CommandService, QueryService}
-// (the driving ports) and never on the domain or any outbound adapter
-// directly.
+// layer over HTTP. It depends on application.{ProductCommandService,
+// ProductQueryService} (the driving ports) and never on the domain or
+// any outbound adapter directly.
 package http
 
 import (
@@ -15,14 +15,14 @@ import (
 
 // Handler bundles the use-case services that the HTTP layer drives.
 type Handler struct {
-	commands *application.CommandService
-	queries  *application.QueryService
+	commands *application.ProductCommandService
+	queries  *application.ProductQueryService
 	logger   zerolog.Logger
 }
 
 func NewHandler(
-	commands *application.CommandService,
-	queries *application.QueryService,
+	commands *application.ProductCommandService,
+	queries *application.ProductQueryService,
 	logger zerolog.Logger,
 ) *Handler {
 	return &Handler{

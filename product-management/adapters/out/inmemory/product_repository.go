@@ -1,19 +1,13 @@
-// Package memory contains the outbound adapter that stores products in
-// process memory. It implements both application.ProductWriter and
-// application.ProductReader, so a single instance backs both sides of
-// the CQRS split.
-//
-// Swapping this for a real database (Postgres, SQLite, ...) means
-// writing a sibling package that satisfies the same interfaces and
-// changing one line in main.go.
-package memory
+// Package inmemory contains the outbound adapter that stores products in
+// process memory. It implements application.ProductRepository.
+package inmemory
 
 import (
 	"context"
 	"sort"
 	"sync"
 
-	"cmd/product-management/domain/product"
+	product "cmd/product-management/domain"
 )
 
 // ProductRepository is the in-memory database. The map is the database;
@@ -32,7 +26,7 @@ func NewProductRepository() *ProductRepository {
 // Save persists a product. Returns ErrAlreadyExists if a product with the
 // same ID is already stored, mirroring how a real DB would behave with a
 // unique key.
-func (r *ProductRepository) Save(ctx context.Context, p product.Product) error {
+func (r *ProductRepository) Save(_ context.Context, p product.Product) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -43,10 +37,10 @@ func (r *ProductRepository) Save(ctx context.Context, p product.Product) error {
 	return nil
 }
 
-// List returns all products, sorted by name so callers see a stable
+// FindAll returns all products, sorted by name so callers see a stable
 // order (Go map iteration is randomized). The returned slice is a copy
 // - mutating it cannot corrupt the repository.
-func (r *ProductRepository) List(ctx context.Context) ([]product.Product, error) {
+func (r *ProductRepository) FindAll(_ context.Context) ([]product.Product, error) {
 	r.mu.RLock()
 	out := make([]product.Product, 0, len(r.store))
 	for _, p := range r.store {
