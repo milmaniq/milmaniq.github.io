@@ -1,0 +1,1443 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description"
+        content="A complete step-by-step guide to building a product-management microservice in Go using hexagonal architecture (ports and adapters), CQRS, interfaces, Gin, Zerolog, MongoDB, uber/fx for dependency injection, locking & transactions, and integration testing with Testcontainers." />
+    <meta name="keywords"
+        content="Go, Golang, Hexagonal Architecture, Ports and Adapters, CQRS, uber/fx, MongoDB, Testcontainers, Testify, Gin, Zerolog, UUID, Microservice, Clean Architecture, Dependency Injection, Optimistic Locking, Pessimistic Locking, Transactions" />
+    <meta name="author" content="Ilman Iqbal" />
+    <title>Building a Go Microservice with Hexagonal Architecture, CQRS, and uber/fx</title>
+    <script type="application/ld+json">
+        {
+            "@context": "https://schema.org",
+            "@type": "Article",
+            "headline": "Building a Go Microservice with Hexagonal Architecture, CQRS, and uber/fx",
+            "author": {
+                "@type": "Person",
+                "name": "Ilman Iqbal",
+                "url": "https://www.linkedin.com/in/ilman-iqbal-096308172"
+            },
+            "publisher": {
+                "@type": "Organization",
+                "name": "Ilman Iqbal",
+                "url": "https://ilmaniqbal.com",
+                "logo": {
+                    "@type": "ImageObject",
+                    "url": "https://ilmaniqbal.com/img/logo.png"
+                }
+            },
+            "datePublished": "2026-05-16",
+            "dateModified": "2026-08-22",
+            "description": "Walks through building a product-management microservice in Go using hexagonal architecture, CQRS, interfaces, gin, zerolog, uuid, mongodb, uber/fx for dependency injection, and integration testing with Testcontainers.",
+            "keywords": "Go, Golang, Hexagonal Architecture, Ports and Adapters, CQRS, uber/fx, fx.Provide, fx.Invoke, gin, zerolog, uuid, mongodb, testcontainers, dependency injection, microservice",
+            "mainEntityOfPage": {
+                "@type": "WebPage",
+                "@id": "https://ilmaniqbal.com/hexagonal-architecture-cqrs-go-microservice.html"
+            }
+        }
+    </script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Source+Sans+Pro&display=swap" rel="stylesheet" />
+    <link href="css/bootstrap.min.css" rel="stylesheet">
+    <link href="css/blog.css" rel="stylesheet">
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-8PPCHX9PDV"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag() { dataLayer.push(arguments); }
+        gtag('js', new Date());
+        gtag('config', 'G-8PPCHX9PDV');
+    </script>
+</head>
+
+<body>
+    <div class="container">
+        <header class="site-header">
+            <a href="index.html" class="site-logo-wrapper" style="text-decoration: none; color: inherit;">
+                <div class="site-logo"><i class="fas fa-code fa-2x"></i></div>
+                <h1>Ilman Iqbal's Blog</h1>
+            </a>
+        </header>
+
+        <h2 class="tm-post-title">Building a Go Microservice with Hexagonal Architecture, CQRS, and uber/fx</h2>
+        <p class="meta">May 16, 2026 posted by Ilman Iqbal</p>
+
+        <p>
+            When writing backend services in Go, it is tempting to start with a flat structure where HTTP handlers directly execute database queries and format JSON responses. While this works for small scripts, it quickly becomes unmaintainable as services grow in complexity.
+        </p>
+
+        <p>
+            In this guide, we walk through building a production-shaped <code>product-management</code> microservice in Go using
+            <strong>Hexagonal Architecture (Ports and Adapters)</strong>, a <strong>CQRS (Command Query Responsibility Segregation)</strong> split,
+            <strong>interfaces</strong>, <code>gin</code>, <code>zerolog</code>, <code>google/uuid</code>, <code>mongodb</code>,
+            and <code>uber/fx</code> for dependency injection. We also explore <strong>locking mechanisms</strong>, <strong>database transactions</strong>, and <strong>integration testing with Testcontainers</strong>.
+        </p>
+
+        <p>
+            By the end you will understand how to structure a Go service so its core business logic stays completely independent of the web framework, the database, the logger, or any other infrastructure choice.
+        </p>
+
+        <div class="tip">
+            <p>
+                <strong>Prerequisites:</strong> If you are new to Go or want to brush up on goroutines, channels, mutexes, context, or multi-module workspaces, read the companion guide: <a href="go-fundamentals.html"><strong>Go Fundamentals — The Complete Guide to Core Concepts, Concurrency, and Tooling</strong></a>.
+            </p>
+        </div>
+
+        <hr />
+
+        <h2>1. Architectural Concepts: Hexagonal Architecture, CQRS &amp; Ports</h2>
+
+        <h3>What is a REST API?</h3>
+        <p>
+            A <strong>REST API</strong> (Representational State Transfer Application Programming Interface)
+            is a way for applications to communicate over HTTP by following REST principles:
+        </p>
+        <ul>
+            <li><strong>Resources</strong> are identified by URLs — e.g. <code>/products</code>.</li>
+            <li><strong>Operations</strong> are performed using standard HTTP methods: <code>GET</code>
+                (read), <code>POST</code> (create), <code>PUT</code>/<code>PATCH</code> (update),
+                <code>DELETE</code> (remove).</li>
+            <li><strong>Stateless</strong> — each request contains all the information the server needs to
+                process it; no client session state is stored on the server.</li>
+            <li>Responses are typically <strong>JSON</strong>.</li>
+        </ul>
+
+        <h3>What is Hexagonal Architecture? (A 60-Second Crash Course)</h3>
+        <p>
+            Hexagonal architecture — also called <strong>ports and adapters</strong> — is a way of organising
+            code so the <em>core business logic</em> doesn't depend on the framework, the database, or any
+            other external concern. Instead, the core defines <strong>ports</strong> (interfaces) that describe
+            what it needs from the outside world, and <strong>adapters</strong> are the concrete things that
+            plug into those ports.
+        </p>
+
+        <p>Three layers, in order from inside to outside:</p>
+        <ol>
+            <li><strong>Domain Layer</strong> — pure business entities and rules. It has zero external dependencies (no HTTP, no database drivers, no JSON tags).</li>
+            <li><strong>Application Layer</strong> — the use cases that orchestrate the domain (e.g. <code>ProductCommandService</code>, <code>ProductQueryService</code>). It depends only on the domain and on a set of port <em>interfaces</em>.</li>
+            <li><strong>Adapters Layer</strong> — concrete implementations of those ports. Two flavours:
+                <ul>
+                    <li><strong>Inbound (Driving)</strong> — things that <em>call into</em> the application (e.g. HTTP handlers, gRPC servers, CLI commands, message consumers).</li>
+                    <li><strong>Outbound (Driven)</strong> — things the application <em>calls out to</em> (e.g. MongoDB, PostgreSQL, in-memory repository, Redis cache, third-party APIs).</li>
+                </ul>
+            </li>
+        </ol>
+
+        <div class="tip">
+            <p>
+                <strong>The Inward Dependency Rule:</strong> Dependencies always point strictly <em>inward</em>:
+                <em>adapters depend on application</em>, <em>application depends on domain</em>,
+                and the domain depends on nothing. Swap MongoDB for Postgres or an in-memory map? Write a new outbound adapter — nothing in the application or domain layer changes.
+            </p>
+        </div>
+
+        <h3>Where Should Interfaces Live?</h3>
+        <p>
+            The general rule is:
+            <strong>Interfaces belong to the layer that depends on them, not the layer implementing them.</strong>
+        </p>
+        <ul>
+            <li>In hexagonal architecture, the <strong>application layer</strong> defines what it needs from the outside world via ports.</li>
+            <li>The <strong>domain layer</strong> contains the domain struct and business rules. It does not know about repositories, HTTP, databases, JSON, etc.</li>
+            <li>The <strong>application layer</strong> contains use cases (e.g. <code>addProduct</code>, <code>listProducts</code>, etc.).</li>
+            <li>The <strong>HTTP (Adapter) layer</strong> must know about application use cases (application layer), but the application layer knows nothing about HTTP.</li>
+        </ul>
+
+        <pre><code>// application/ports/repository.go
+package ports
+
+import "cmd/product-management/domain" // or "yourapp/domain"
+</code></pre>
+
+        <h3>Understanding Ports: Inbound vs Outbound Ports</h3>
+        <p>
+            <strong>"ports"</strong> is a standard concept in Hexagonal Architecture, the package name itself is just a convention. A port is simply an interface that defines how the application core communicates with the outside world.
+        </p>
+
+        <h4>1. Inbound Ports</h4>
+        <p>
+            Used by things that <em>call your application</em>.
+        </p>
+        <pre><code>type ProductService interface {
+    AddProduct(cmd AddProductCommand) error
+    ListProducts() ([]Product, error)
+}
+</code></pre>
+        <p>
+            Called by:
+        </p>
+        <ul>
+            <li>HTTP API</li>
+            <li>gRPC</li>
+            <li>CLI</li>
+            <li>Message consumer</li>
+        </ul>
+        <p>
+            Many Java/C# Hexagonal architectures use inbound ports heavily. In Go, concrete application service structs are often called directly by inbound adapters, though interfaces can be introduced whenever multiple driving adapters or mocks require them.
+        </p>
+
+        <h4>2. Outbound Ports</h4>
+        <p>
+            Used by your application to <em>call external systems</em>.
+        </p>
+        <pre><code>type ProductRepository interface {
+    Save(product Product) error
+    FindAll() ([]Product, error)
+}
+</code></pre>
+        <p>
+            Implemented by:
+        </p>
+        <ul>
+            <li>Postgres adapter</li>
+            <li>Redis adapter</li>
+            <li>Memory adapter</li>
+            <li>MongoDB adapter</li>
+        </ul>
+        <p>
+            In Go, this is the most common use of ports.
+        </p>
+
+        <h3>What is CQRS?</h3>
+        <p>
+            <strong>Command Query Responsibility Segregation (CQRS)</strong> splits your code into a "write side" that
+            executes commands (e.g. <code>AddProduct</code>) and a "read side" that runs queries
+            (e.g. <code>ListProducts</code>).
+        </p>
+        <p>
+            The two sides can use different code paths and even different data stores. In our service, we structure use cases into <code>ProductCommandService</code> and <code>ProductQueryService</code>, allowing each side to evolve independently.
+        </p>
+
+        <h3>Project Layout Conventions</h3>
+        <p>
+            How you organize your application directory depends on the scale of the service:
+        </p>
+
+        <h4>For a medium or large project:</h4>
+        <pre><code>application/
+├── product/
+│   ├── command_service.go
+│   └── query_service.go
+├── customer/
+│   ├── command_service.go
+│   └── query_service.go
+</code></pre>
+
+        <h4>For a small project:</h4>
+        <pre><code>application/
+├── product_command_service.go
+├── product_query_service.go
+├── customer_command_service.go
+├── customer_query_service.go
+</code></pre>
+
+        <h3>Interface Implementation Naming: Go vs Java</h3>
+        <p>
+            If <code>ports.go</code> (or <code>ports/repository.go</code>) contains the <code>ProductRepository</code> interface, and you're implementing it in an outbound adapter, then <strong>avoid names like <code>ProductRepositoryImpl</code></strong> because that's more of a Java convention than a Go convention.
+        </p>
+        <p>
+            Better options in Go:
+        </p>
+        <ul>
+            <li><code>MongoProductRepository</code>, <code>InMemoryProductRepository</code></li>
+            <li>Package-scoped <code>ProductRepository</code> in <code>package mongo</code> or <code>package inmemory</code> (used as <code>mongo.ProductRepository</code>, <code>inmemory.ProductRepository</code>).</li>
+        </ul>
+
+        <h3>High-Level Architecture Structure</h3>
+        <p>
+            If you have the following structure:
+        </p>
+        <pre><code>adapters/
+├── in/
+│   └── http/
+│       ├── handler.go
+│       └── product_handler.go
+│
+└── out/
+    └── mongo/
+        └── product_repository.go
+
+application/
+├── product_command_service.go
+├── product_query_service.go
+└── ports/
+    └── repository.go
+
+domain/
+├── errors.go
+└── product.go
+</code></pre>
+
+        <p>Here is how the adapters and wiring fit together:</p>
+        <pre><code>// adapters/in/http
+package http
+
+type Handler struct {
+    commands *application.ProductCommandService
+    queries  *application.ProductQueryService
+    logger   zerolog.Logger
+}
+</code></pre>
+
+        <pre><code>// adapters/out/mongo
+package mongo
+
+type ProductRepository struct {
+    coll *mongo.Collection // or db *sql.DB in SQL adapters
+}
+</code></pre>
+
+        <pre><code>// Wiring in main.go:
+func main() {
+    // create database connection
+    db := createMongoConnection()
+
+    // create repository adapter
+    productRepo := mongoadapter.NewProductRepository(db)
+
+    // create application services
+    productCommandService := app.NewProductCommandService(productRepo)
+    productQueryService := app.NewProductQueryService(productRepo)
+
+    // create http handler
+    productHandler := httpadapter.NewProductHandler(
+        productCommandService,
+        productQueryService,
+    )
+
+    // register routes
+    mux := http.NewServeMux()
+
+    mux.HandleFunc("GET /products", productHandler.ListProducts)
+    mux.HandleFunc("POST /products", productHandler.AddProduct)
+
+    log.Println("server running on :8080")
+    log.Fatal(http.ListenAndServe(":8080", mux))
+}
+</code></pre>
+
+        <hr />
+
+        <h2>2. Building the <code>product-management</code> Microservice</h2>
+
+        <h3>The Starting Point</h3>
+        <p>We begin with the simplest possible <code>main.go</code> — just enough to serve a single endpoint:</p>
+        <pre><code>package main
+
+import (
+    "fmt"
+    "github.com/gin-gonic/gin"
+)
+
+func main() {
+    fmt.Println("Hello, World!")
+
+    server := gin.Default()
+    server.GET("/products", getProducts)
+    server.Run(":8080")
+}
+
+func getProducts(c *gin.Context) {
+    c.JSON(200, gin.H{"name": "Car Wipers"})
+}
+</code></pre>
+
+        <p>Let's unpack what each gin call does:</p>
+        <ul>
+            <li><code>gin.Default()</code> — creates an HTTP server pre-configured with a <strong>logger</strong> and a <strong>recovery</strong> handler (catches panics and returns <code>500</code>).</li>
+            <li><code>server.GET("/products", getProducts)</code> — registers the handler for <code>GET /products</code>.</li>
+            <li><code>*gin.Context</code> — passed to every handler to read requests and write responses.</li>
+            <li><code>gin.H</code> — a convenience alias for <code>map[string]any</code>.</li>
+        </ul>
+
+        <p>
+            That works, but everything is mixed together: routing, business logic, and data. We cannot test business rules in isolation or swap databases without modifying the HTTP handler.
+        </p>
+
+        <h3>The Target Project Layout</h3>
+        <pre><code>product-management/
+├── main.go                                ← Composition root: wires interfaces to adapters
+├── go.mod
+├── go.sum
+│
+├── domain/                                ← Pure business rules, no I/O
+│   ├── product.go                         ←   Product entity + value types + validation
+│   └── errors.go                          ←   Domain sentinel errors
+│
+├── application/                           ← Use cases (drives the domain)
+│   ├── ports/
+│   │   └── repository.go                  ←   ProductRepository, IDGenerator ports
+│   ├── product_command_service.go         ←   Write side of CQRS (AddProduct)
+│   └── product_query_service.go           ←   Read side of CQRS (ListProducts)
+│
+├── adapters/                              ← All I/O lives here
+│   ├── in/
+│   │   └── http/                          ← Inbound HTTP adapter
+│   │       ├── handler.go                 ←   Router and Handler struct
+│   │       └── product_handler.go         ←   Endpoint request/response logic
+│   └── out/                               ← Outbound adapters (databases)
+│       ├── inmemory/
+│       │   └── product_repository.go      ←   In-memory map repository
+│       └── mongo/
+│           └── product_repository.go      ←   MongoDB repository
+│
+└── tests/
+    └── product_api_test.go                ← Integration tests with Testcontainers
+</code></pre>
+
+        <h3>Step 1 — The Domain Layer</h3>
+        <p>
+            The <code>Product</code> entity exposes a constructor that enforces invariants. Fields are unexported so an invalid <code>Product</code> cannot be created with a struct literal.
+        </p>
+        <pre><code>// domain/product.go
+package product
+
+import "strings"
+
+// ID is the unique identifier of a Product.
+type ID string
+
+// Name is the product display name.
+type Name string
+
+// Price is the product price in minor currency units (e.g. cents) so we
+// can keep the value as int64 and avoid floating-point precision issues.
+type Price int64
+
+// Product is the domain entity.
+type Product struct {
+    id    ID
+    name  Name
+    price Price
+}
+
+// New builds a valid Product or returns an error explaining why the input is invalid.
+func New(id ID, name Name, price Price) (Product, error) {
+    if strings.TrimSpace(string(name)) == "" {
+        return Product{}, ErrEmptyName
+    }
+    if price &lt;= 0 {
+        return Product{}, ErrInvalidPrice
+    }
+    return Product{
+        id:    id,
+        name:  name,
+        price: price,
+    }, nil
+}
+
+func (p Product) ID() ID       { return p.id }
+func (p Product) Name() Name   { return p.name }
+func (p Product) Price() Price { return p.price }
+</code></pre>
+
+        <pre><code>// domain/errors.go
+package product
+
+import "errors"
+
+var (
+    ErrEmptyName     = errors.New("product name is empty")
+    ErrInvalidPrice  = errors.New("product price must be positive")
+    ErrAlreadyExists = errors.New("product already exists")
+)
+</code></pre>
+
+        <h3>Step 2 — The Application Layer (Ports + Use Cases)</h3>
+        <p>
+            Ports are interfaces that describe <em>what the application needs from external systems</em>.
+        </p>
+        <pre><code>// application/ports/repository.go
+package ports
+
+import (
+    "context"
+
+    product "cmd/product-management/domain"
+)
+
+// ProductRepository is the outbound port for persisting and loading products.
+type ProductRepository interface {
+    Save(ctx context.Context, p product.Product) error
+    FindAll(ctx context.Context) ([]product.Product, error)
+}
+
+// IDGenerator abstracts ID creation so the domain stays deterministic and easy to test.
+type IDGenerator interface {
+    NewID() product.ID
+}
+</code></pre>
+
+        <pre><code>// application/product_command_service.go
+package application
+
+import (
+    "context"
+    "fmt"
+
+    "cmd/product-management/application/ports"
+    product "cmd/product-management/domain"
+)
+
+// ProductCommandService is the write side of CQRS.
+type ProductCommandService struct {
+    repo ports.ProductRepository
+    ids  ports.IDGenerator
+}
+
+func NewProductCommandService(repo ports.ProductRepository, ids ports.IDGenerator) *ProductCommandService {
+    return &amp;ProductCommandService{repo: repo, ids: ids}
+}
+
+type AddProductCommand struct {
+    Name  string
+    Price int64
+}
+
+type AddProductResult struct {
+    ID string
+}
+
+func (s *ProductCommandService) AddProduct(ctx context.Context, cmd AddProductCommand) (AddProductResult, error) {
+    id := s.ids.NewID()
+
+    p, err := product.New(id, product.Name(cmd.Name), product.Price(cmd.Price))
+    if err != nil {
+        return AddProductResult{}, fmt.Errorf("add product: %w", err)
+    }
+
+    if err := s.repo.Save(ctx, p); err != nil {
+        return AddProductResult{}, fmt.Errorf("save product: %w", err)
+    }
+    return AddProductResult{ID: string(id)}, nil
+}
+</code></pre>
+
+        <pre><code>// application/product_query_service.go
+package application
+
+import (
+    "context"
+    "fmt"
+
+    "cmd/product-management/application/ports"
+    product "cmd/product-management/domain"
+)
+
+// ProductQueryService is the read side of CQRS.
+type ProductQueryService struct {
+    repo ports.ProductRepository
+}
+
+func NewProductQueryService(repo ports.ProductRepository) *ProductQueryService {
+    return &amp;ProductQueryService{repo: repo}
+}
+
+// ProductView is the DTO returned by the read side, independent of the domain entity.
+type ProductView struct {
+    ID    string `json:"id"`
+    Name  string `json:"name"`
+    Price int64  `json:"price"`
+}
+
+func (s *ProductQueryService) ListProducts(ctx context.Context) ([]ProductView, error) {
+    products, err := s.repo.FindAll(ctx)
+    if err != nil {
+        return nil, fmt.Errorf("list products: %w", err)
+    }
+
+    views := make([]ProductView, 0, len(products))
+    for _, p := range products {
+        views = append(views, viewOf(p))
+    }
+    return views, nil
+}
+
+func viewOf(p product.Product) ProductView {
+    return ProductView{
+        ID:    string(p.ID()),
+        Name:  string(p.Name()),
+        Price: int64(p.Price()),
+    }
+}
+</code></pre>
+
+        <h3>Step 3 — Outbound Adapters (In-Memory &amp; MongoDB)</h3>
+
+        <h4>In-Memory Database Adapter</h4>
+        <pre><code>// adapters/out/inmemory/product_repository.go
+package inmemory
+
+import (
+    "context"
+    "sort"
+    "sync"
+
+    product "cmd/product-management/domain"
+)
+
+type ProductRepository struct {
+    mu    sync.RWMutex
+    store map[product.ID]product.Product
+}
+
+func NewProductRepository() *ProductRepository {
+    return &amp;ProductRepository{
+        store: make(map[product.ID]product.Product),
+    }
+}
+
+func (r *ProductRepository) Save(_ context.Context, p product.Product) error {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+
+    if _, exists := r.store[p.ID()]; exists {
+        return product.ErrAlreadyExists
+    }
+    r.store[p.ID()] = p
+    return nil
+}
+
+func (r *ProductRepository) FindAll(_ context.Context) ([]product.Product, error) {
+    r.mu.RLock()
+    out := make([]product.Product, 0, len(r.store))
+    for _, p := range r.store {
+        out = append(out, p)
+    }
+    r.mu.RUnlock()
+
+    sort.Slice(out, func(i, j int) bool {
+        return out[i].Name() &lt; out[j].Name()
+    })
+    return out, nil
+}
+</code></pre>
+
+        <h4>MongoDB Outbound Adapter</h4>
+        <pre><code>// adapters/out/mongo/product_repository.go
+package mongo
+
+import (
+    "context"
+    "errors"
+    "fmt"
+
+    product "cmd/product-management/domain"
+
+    "go.mongodb.org/mongo-driver/bson"
+    mongodriver "go.mongodb.org/mongo-driver/mongo"
+    "go.mongodb.org/mongo-driver/mongo/options"
+)
+
+const (
+    databaseName   = "product_management"
+    collectionName = "products"
+)
+
+type productDocument struct {
+    ID    string `bson:"_id"`
+    Name  string `bson:"name"`
+    Price int64  `bson:"price"`
+}
+
+type ProductRepository struct {
+    coll *mongodriver.Collection
+}
+
+func NewProductRepository(client *mongodriver.Client) *ProductRepository {
+    return &amp;ProductRepository{
+        coll: client.Database(databaseName).Collection(collectionName),
+    }
+}
+
+func (r *ProductRepository) Save(ctx context.Context, p product.Product) error {
+    doc := productDocument{
+        ID:    string(p.ID()),
+        Name:  string(p.Name()),
+        Price: int64(p.Price()),
+    }
+
+    _, err := r.coll.InsertOne(ctx, doc)
+    if err != nil {
+        if mongodriver.IsDuplicateKeyError(err) {
+            return product.ErrAlreadyExists
+        }
+        return fmt.Errorf("insert product: %w", err)
+    }
+    return nil
+}
+
+func (r *ProductRepository) FindAll(ctx context.Context) ([]product.Product, error) {
+    opts := options.Find().SetSort(bson.D{{Key: "name", Value: 1}})
+    cursor, err := r.coll.Find(ctx, bson.D{}, opts)
+    if err != nil {
+        return nil, fmt.Errorf("find products: %w", err)
+    }
+    defer cursor.Close(ctx)
+
+    var docs []productDocument
+    if err := cursor.All(ctx, &amp;docs); err != nil {
+        return nil, fmt.Errorf("decode products: %w", err)
+    }
+
+    out := make([]product.Product, 0, len(docs))
+    for _, doc := range docs {
+        p, err := product.New(product.ID(doc.ID), product.Name(doc.Name), product.Price(doc.Price))
+        if err != nil {
+            return nil, fmt.Errorf("rebuild product %q: %w", doc.ID, err)
+        }
+        out = append(out, p)
+    }
+    return out, nil
+}
+
+func Connect(ctx context.Context, uri string) (*mongodriver.Client, error) {
+    client, err := mongodriver.Connect(ctx, options.Client().ApplyURI(uri))
+    if err != nil {
+        return nil, fmt.Errorf("connect mongo: %w", err)
+    }
+    if err := client.Ping(ctx, nil); err != nil {
+        _ = client.Disconnect(ctx)
+        return nil, fmt.Errorf("ping mongo: %w", err)
+    }
+    return client, nil
+}
+
+func Disconnect(ctx context.Context, client *mongodriver.Client) error {
+    if client == nil {
+        return nil
+    }
+    err := client.Disconnect(ctx)
+    if err != nil &amp;&amp; !errors.Is(err, mongodriver.ErrClientDisconnected) {
+        return err
+    }
+    return nil
+}
+</code></pre>
+
+        <h3>Step 4 — The Inbound HTTP Adapter</h3>
+        <p>
+            The HTTP adapter maps incoming HTTP requests to use-case commands/queries and formats JSON responses.
+        </p>
+
+        <pre><code>// adapters/in/http/handler.go
+package http
+
+import (
+    "net/http"
+
+    "cmd/product-management/application"
+
+    "github.com/gin-gonic/gin"
+    "github.com/rs/zerolog"
+)
+
+type Handler struct {
+    commands *application.ProductCommandService
+    queries  *application.ProductQueryService
+    logger   zerolog.Logger
+}
+
+func NewHandler(
+    commands *application.ProductCommandService,
+    queries *application.ProductQueryService,
+    logger zerolog.Logger,
+) *Handler {
+    return &amp;Handler{
+        commands: commands,
+        queries:  queries,
+        logger:   logger,
+    }
+}
+
+func (h *Handler) Routes() http.Handler {
+    engine := gin.New()
+    engine.Use(gin.Recovery())
+    engine.HandleMethodNotAllowed = true
+
+    engine.GET("/products", h.listProducts)
+    engine.POST("/products", h.addProduct)
+
+    return engine
+}
+</code></pre>
+
+        <pre><code>// adapters/in/http/product_handler.go
+package http
+
+import (
+    "errors"
+    "net/http"
+
+    "cmd/product-management/application"
+    product "cmd/product-management/domain"
+
+    "github.com/gin-gonic/gin"
+)
+
+func (h *Handler) listProducts(c *gin.Context) {
+    views, err := h.queries.ListProducts(c.Request.Context())
+    if err != nil {
+        h.logger.Error().Err(err).Msg("list products failed")
+        c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list products"})
+        return
+    }
+    c.JSON(http.StatusOK, gin.H{"products": views})
+}
+
+type addProductRequest struct {
+    Name  string `json:"name"`
+    Price int64  `json:"price"`
+}
+
+func (h *Handler) addProduct(c *gin.Context) {
+    var req addProductRequest
+    if err := c.ShouldBindJSON(&amp;req); err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+        return
+    }
+
+    res, err := h.commands.AddProduct(c.Request.Context(), application.AddProductCommand{
+        Name:  req.Name,
+        Price: req.Price,
+    })
+    if err != nil {
+        switch {
+        case errors.Is(err, product.ErrEmptyName),
+            errors.Is(err, product.ErrInvalidPrice),
+            errors.Is(err, product.ErrAlreadyExists):
+            c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+        default:
+            h.logger.Error().Err(err).Msg("add product failed")
+            c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to add product"})
+        }
+        return
+    }
+
+    c.JSON(http.StatusCreated, gin.H{"id": res.ID})
+}
+</code></pre>
+
+        <h3>Step 5 — The Composition Root (Manual Wiring)</h3>
+        <p>
+            <code>main.go</code> is the composition root: the only place that knows about both abstract ports and concrete adapters. Here is how manual wiring looks:
+        </p>
+        <pre><code>// main.go (Manual wiring example)
+func main() {
+    // 1. Create database connection
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+    client, err := mongo.Connect(ctx, "mongodb://localhost:27017")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // 2. Create repository adapter (satisfies ports.ProductRepository)
+    productRepo := mongoadapter.NewProductRepository(client)
+    idGen := uuidIDs{}
+
+    // 3. Create application use-case services
+    productCommandService := application.NewProductCommandService(productRepo, idGen)
+    productQueryService := application.NewProductQueryService(productRepo)
+
+    // 4. Create HTTP handler adapter
+    logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
+    handler := httpadapter.NewHandler(productCommandService, productQueryService, logger)
+
+    // 5. Start HTTP server
+    log.Println("server running on :8080")
+    log.Fatal(http.ListenAndServe(":8080", handler.Routes()))
+}
+</code></pre>
+
+        <h3>Step 6 — Build and Test</h3>
+        <pre><code>go build ./...
+go run .
+
+# in another terminal:
+# Add a product
+curl -X POST -H 'Content-Type: application/json' \
+     -d '{"name":"Car Wipers","price":1999}' \
+     http://localhost:8080/products
+# => 201 {"id":"7d8d17cf-909c-4173-bd90-4e777acc60aa"}
+
+# List products
+curl http://localhost:8080/products
+# => 200 {"products":[{"id":"...","name":"Car Wipers","price":1999}]}
+</code></pre>
+
+        <hr />
+
+        <h2>3. Deep Dive: The "Empty <code>go.mod</code>" &amp; Toolchain Mechanics</h2>
+
+        <h3>An Interesting Observation: The Empty <code>go.mod</code></h3>
+        <p>
+            Before adding external packages, the entire <code>go.mod</code> was just three lines:
+        </p>
+        <pre><code>module cmd/product-management
+
+go 1.22
+</code></pre>
+        <p>
+            Why? Because <strong>Go's standard library provides full solutions for routing, logging, ID generation, and synchronization</strong> out of the box:
+        </p>
+
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Capability</th>
+                    <th>Stdlib equivalent</th>
+                    <th>Ecosystem library</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>HTTP Routing</td>
+                    <td><code>net/http</code> <code>ServeMux</code> (Go 1.22+)</td>
+                    <td><code>github.com/gin-gonic/gin</code></td>
+                </tr>
+                <tr>
+                    <td>Structured Logging</td>
+                    <td><code>log/slog</code> (Go 1.21+)</td>
+                    <td><code>github.com/rs/zerolog</code></td>
+                </tr>
+                <tr>
+                    <td>ID Generation</td>
+                    <td><code>crypto/rand</code> + <code>encoding/hex</code></td>
+                    <td><code>github.com/google/uuid</code></td>
+                </tr>
+                <tr>
+                    <td>Concurrency</td>
+                    <td><code>sync.RWMutex</code></td>
+                    <td>In-memory storage</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>A Note on Go Toolchains</h3>
+        <p>
+            Since Go 1.21, Go supports <strong>automatic toolchain switching</strong>. If <code>go.mod</code> specifies a version newer than your installed Go compiler, Go will automatically download the required toolchain.
+        </p>
+
+        <p>You can control this behavior using <code>GOTOOLCHAIN</code>:</p>
+        <pre><code>GOTOOLCHAIN=local go build ./...
+</code></pre>
+
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Situation</th>
+                    <th>What to do</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Building in a sandboxed / offline / CI environment</td>
+                    <td><code>GOTOOLCHAIN=local</code></td>
+                </tr>
+                <tr>
+                    <td>You want strict reproducibility over which Go compiles code</td>
+                    <td><code>GOTOOLCHAIN=local</code></td>
+                </tr>
+                <tr>
+                    <td>Adding a dep that requires a newer Go than yours</td>
+                    <td>Pin to an older version of the dep, or upgrade local Go</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <hr />
+
+        <h2>4. Declarative Dependency Injection with <code>uber/fx</code></h2>
+
+        <h3>What is <code>uber/fx</code>?</h3>
+        <p>
+            <code>uber/fx</code> is a dependency injection framework for Go. You hand it a bag of constructors via
+            <code>fx.Provide(...)</code>; fx introspects parameter and return types, constructs the dependency graph in topological order, manages lifecycles (<code>OnStart</code>, <code>OnStop</code> hooks), and handles graceful shutdown.
+        </p>
+
+        <h3>Key fx primitives</h3>
+        <ul>
+            <li><strong><code>fx.Provide(...)</code></strong> — registers constructor functions into the graph.</li>
+            <li><strong><code>fx.Invoke(...)</code></strong> — kicks off execution (e.g. starting the HTTP server).</li>
+            <li><strong><code>fx.Lifecycle</code></strong> — used to register <code>OnStart</code> and <code>OnStop</code> hooks.</li>
+            <li><strong><code>fx.Shutdowner</code></strong> — allows any component to trigger graceful shutdown programmatically.</li>
+        </ul>
+
+        <h3>The <code>appOptions</code> / <code>newApp</code> / <code>main</code> Pattern</h3>
+        <p>
+            This structure enables clean dynamic adapter selection (switching between MongoDB and In-Memory via environment variables) and allows integration tests to inject test overrides:
+        </p>
+
+        <pre><code>// main.go (Complete with uber/fx & dynamic adapter selection)
+package main
+
+import (
+    "context"
+    "errors"
+    "net/http"
+    "os"
+    "strings"
+    "time"
+
+    httpadapter "cmd/product-management/adapters/in/http"
+    "cmd/product-management/adapters/out/inmemory"
+    mongoadapter "cmd/product-management/adapters/out/mongo"
+    "cmd/product-management/application"
+    "cmd/product-management/application/ports"
+    product "cmd/product-management/domain"
+
+    "github.com/gin-gonic/gin"
+    "github.com/google/uuid"
+    "github.com/rs/zerolog"
+    "go.mongodb.org/mongo-driver/mongo"
+    "go.uber.org/fx"
+    "go.uber.org/fx/fxevent"
+)
+
+const (
+    httpAddr            = ":8080"
+    shutdownTimeout     = 5 * time.Second
+    mongoConnectTimeout = 10 * time.Second
+    defaultMongoURI     = "mongodb://localhost:27017"
+)
+
+type uuidIDs struct{}
+
+func (uuidIDs) NewID() product.ID { return product.ID(uuid.NewString()) }
+
+func newLogger() zerolog.Logger {
+    return zerolog.New(os.Stdout).Level(zerolog.InfoLevel).With().Timestamp().Logger()
+}
+
+func asIDGenerator() ports.IDGenerator { return uuidIDs{} }
+
+func productRepositoryKind() string {
+    switch strings.ToLower(os.Getenv("PRODUCT_REPOSITORY")) {
+    case "memory":
+        return "memory"
+    default:
+        return "mongo"
+    }
+}
+
+func mongoURI() string {
+    if uri := os.Getenv("MONGO_URI"); uri != "" {
+        return uri
+    }
+    return defaultMongoURI
+}
+
+func newMongoClient(lc fx.Lifecycle, logger zerolog.Logger) (*mongo.Client, error) {
+    connectCtx, cancel := context.WithTimeout(context.Background(), mongoConnectTimeout)
+    defer cancel()
+
+    client, err := mongoadapter.Connect(connectCtx, mongoURI())
+    if err != nil {
+        return nil, err
+    }
+
+    lc.Append(fx.Hook{
+        OnStop: func(ctx context.Context) error {
+            if err := mongoadapter.Disconnect(ctx, client); err != nil {
+                return err
+            }
+            logger.Info().Msg("mongo client disconnected")
+            return nil
+        },
+    })
+
+    logger.Info().Str("uri", mongoURI()).Msg("mongo client connected")
+    return client, nil
+}
+
+func newProductRepository(
+    lc fx.Lifecycle,
+    logger zerolog.Logger,
+) (ports.ProductRepository, error) {
+    switch productRepositoryKind() {
+    case "memory":
+        logger.Info().Msg("using in-memory product repository")
+        return inmemory.NewProductRepository(), nil
+    default:
+        client, err := newMongoClient(lc, logger)
+        if err != nil {
+            return nil, err
+        }
+        return mongoadapter.NewProductRepository(client), nil
+    }
+}
+
+func newHTTPHandler(h *httpadapter.Handler) http.Handler { return h.Routes() }
+
+func newHTTPServer(handler http.Handler) *http.Server {
+    return &amp;http.Server{
+        Addr:              httpAddr,
+        Handler:           handler,
+        ReadHeaderTimeout: 5 * time.Second,
+    }
+}
+
+func registerHTTPServer(
+    lc fx.Lifecycle,
+    logger zerolog.Logger,
+    server *http.Server,
+    shutdowner fx.Shutdowner,
+) {
+    lc.Append(fx.Hook{
+        OnStart: func(ctx context.Context) error {
+            go func() {
+                logger.Info().Str("addr", server.Addr).Msg("http server starting")
+                if err := server.ListenAndServe(); err != nil &amp;&amp; !errors.Is(err, http.ErrServerClosed) {
+                    logger.Error().Err(err).Msg("http server error")
+                    _ = shutdowner.Shutdown(fx.ExitCode(1))
+                }
+            }()
+            return nil
+        },
+        OnStop: func(ctx context.Context) error {
+            shutdownCtx, cancel := context.WithTimeout(ctx, shutdownTimeout)
+            defer cancel()
+            if err := server.Shutdown(shutdownCtx); err != nil {
+                return err
+            }
+            logger.Info().Msg("http server stopped")
+            return nil
+        },
+    })
+}
+
+func appOptions(overrides ...fx.Option) []fx.Option {
+    gin.SetMode(gin.ReleaseMode)
+
+    opts := []fx.Option{
+        fx.WithLogger(func() fxevent.Logger { return fxevent.NopLogger }),
+
+        fx.Provide(
+            newLogger,
+            asIDGenerator,
+            newProductRepository,
+            application.NewProductCommandService,
+            application.NewProductQueryService,
+            httpadapter.NewHandler,
+            newHTTPHandler,
+            newHTTPServer,
+        ),
+
+        fx.Invoke(registerHTTPServer),
+    }
+    return append(opts, overrides...)
+}
+
+func newApp(overrides ...fx.Option) *fx.App { return fx.New(appOptions(overrides...)...) }
+
+func main() { newApp().Run() }
+</code></pre>
+
+        <hr />
+
+        <h2>5. Concurrency Control, Locking &amp; Transactions</h2>
+
+        <h3>Locking</h3>
+
+        <h4>1. Pessimistic Locking</h4>
+        <p>
+            The database sets a lock to the record during field/read so that another transaction cannot update the same record.
+        </p>
+        <p>
+            Common in Oracle, MySQL:
+        </p>
+        <pre><code>-- SQL Pessimistic Locking
+SELECT * FROM products WHERE id = 1 FOR UPDATE;
+</code></pre>
+
+        <h4>2. Optimistic Locking</h4>
+        <p>
+            Detect concurrent updates to the same document via a <code>version</code> field. If the version field is different, then it is a conflict.
+        </p>
+
+        <h3>Transactions</h3>
+        <p>
+            <strong>What it does:</strong> Makes several reads/writes commit or abort all together.
+        </p>
+        <p>
+            <code>session.WithTransaction()</code> from the mongo driver library is used for transaction management.
+        </p>
+
+        <h4>How <code>WithTransaction</code> Works:</h4>
+        <p>Flow was roughly:</p>
+        <ol>
+            <li>Start a mongo session (<code>client.StartSession()</code>).</li>
+            <li>Run your callback inside <code>session.WithTransaction</code>.</li>
+            <li>Pass the session context (<code>SessionContext</code>) into repo methods like <code>Save(txCtx, p)</code>.</li>
+            <li>Mongo tracks reads/writes in that transaction.</li>
+            <li>On commit, Mongo checks: <em>“Did anyone else change data I touched?”</em>
+                <ul>
+                    <li><strong>No</strong> &rarr; commit</li>
+                    <li><strong>Yes</strong> &rarr; abort (<code>WriteConflict</code>)</li>
+                </ul>
+            </li>
+            <li>The Go driver retries the whole callback on transient errors (including some conflicts).</li>
+            <li><strong>This requires replica set.</strong></li>
+        </ol>
+
+        <div class="tip">
+            <p>
+                <strong>When Transactions Matter:</strong>
+                <br />
+                A transaction would only matter if one use case did multiple coordinated writes, e.g.: when adding a new product to the inventory, then the transaction must contain all these operations — <strong>insert product, insert audit log, update inventory</strong>. Then <code>WithTransaction()</code> in MongoDB ensures all three succeed or none do.
+                <br /><br />
+                If you have only one operation (e.g. insert product), then a transaction is usually unnecessary overhead.
+            </p>
+        </div>
+
+        <h3>Application-Level Optimistic Locking</h3>
+        <p>
+            This is used for concurrent updates to same document. Mongo does not give you this automatically. You add it:
+        </p>
+
+        <pre><code>// read product, version = 3
+db.products.updateOne(
+  { _id: "abc", version: 3 },
+  { $set: { price: 2000, version: 4 } }
+)
+// if matchedCount == 0 → someone else updated first → retry or 409 Conflict
+</code></pre>
+
+        <p><strong>Pattern:</strong></p>
+        <ol>
+            <li>Read doc + version</li>
+            <li>Apply business logic</li>
+            <li>Update with filter <code>{ _id, version: old }</code></li>
+            <li>On no match &rarr; conflict &rarr; retry or return error</li>
+        </ol>
+        <p>
+            That is your optimistic locking, separate from Mongo transactions.
+        </p>
+
+        <hr />
+
+        <h2>6. Integration Tests with Testcontainers &amp; Testify</h2>
+
+        <h3>Adding Dependencies</h3>
+        <pre><code>go get github.com/testcontainers/testcontainers-go github.com/testcontainers/testcontainers-go/modules/mongodb github.com/stretchr/testify
+</code></pre>
+
+        <p>
+            <strong><code>testify</code> is required for go test assertions</strong>
+        </p>
+
+        <h3>Core Integration Testing Primitives</h3>
+
+        <h4><code>t.Cleanup(fn)</code></h4>
+        <p>
+            <code>t.Cleanup(fn)</code> registers a function to run after the test finishes, whether it passes or fails. It’s like <code>defer</code>, but tied to the test lifecycle instead of the function scope. They run in reverse order (LIFO):
+        </p>
+        <pre><code>t.Cleanup(func() {
+    require.NoError(t, mongoC.Terminate(ctx))
+})
+// ...
+t.Cleanup(func() {
+    require.NoError(t, mongoadapter.Disconnect(ctx, client))
+})
+// ...
+t.Cleanup(srv.Close)
+</code></pre>
+
+        <h4><code>t.Helper()</code></h4>
+        <p>
+            <code>t.Helper()</code> = provides cleaner failure line numbers in test output.
+        </p>
+
+        <h4><code>t.Run()</code></h4>
+        <p>
+            <code>t.Run()</code> defines a subtest inside a parent test function:
+        </p>
+        <pre><code>func TestProductAPI(t *testing.T) {
+    env := setupTestEnv(t)
+
+    t.Run("add product", func(t *testing.T) {
+        // subtest 1
+    })
+
+    t.Run("list products", func(t *testing.T) {
+        // subtest 2
+    })
+}
+</code></pre>
+
+        <p>
+            <strong>Why use this?</strong> Mongo/container startup runs once in the parent; subtests reuse env. That’s why your suite is faster than two separate top-level tests each calling <code>setupTestEnv</code>.
+        </p>
+        <p>
+            <strong>You can run one subtest:</strong>
+        </p>
+        <pre><code>go test -v ./tests/... -run 'TestProductAPI/list_products'</code></pre>
+        <p>
+            Subtests can call <code>t.Parallel()</code> if they’re independent. Yours share one DB, so they run sequentially.
+        </p>
+
+        <h3>The Complete Integration Test Suite</h3>
+        <pre><code>// tests/product_api_test.go
+package integration_test
+
+import (
+    "bytes"
+    "context"
+    "encoding/json"
+    "fmt"
+    "net/http"
+    "net/http/httptest"
+    "testing"
+    "time"
+
+    httpadapter "cmd/product-management/adapters/in/http"
+    mongoadapter "cmd/product-management/adapters/out/mongo"
+    "cmd/product-management/application"
+    "cmd/product-management/application/ports"
+    product "cmd/product-management/domain"
+
+    "github.com/gin-gonic/gin"
+    "github.com/google/uuid"
+    "github.com/rs/zerolog"
+    "github.com/stretchr/testify/require"
+    "github.com/testcontainers/testcontainers-go/modules/mongodb"
+)
+
+type uuidIDs struct{}
+
+func (uuidIDs) NewID() product.ID { return product.ID(uuid.NewString()) }
+
+type testEnv struct {
+    srv *httptest.Server
+}
+
+func setupTestEnv(t *testing.T) *testEnv {
+    t.Helper()
+
+    gin.SetMode(gin.TestMode)
+    ctx := context.Background()
+
+    // 1. Start MongoDB container
+    mongoC, err := mongodb.Run(ctx, "mongo:7")
+    require.NoError(t, err)
+    t.Cleanup(func() {
+        require.NoError(t, mongoC.Terminate(ctx))
+    })
+
+    uri, err := mongoC.ConnectionString(ctx)
+    require.NoError(t, err)
+
+    // 2. Connect client
+    connectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+    defer cancel()
+
+    client, err := mongoadapter.Connect(connectCtx, uri)
+    require.NoError(t, err)
+    t.Cleanup(func() {
+        require.NoError(t, mongoadapter.Disconnect(ctx, client))
+    })
+
+    // 3. Assemble application graph
+    repo := mongoadapter.NewProductRepository(client)
+    var idGen ports.IDGenerator = uuidIDs{}
+    commands := application.NewProductCommandService(repo, idGen)
+    queries := application.NewProductQueryService(repo)
+    handler := httpadapter.NewHandler(commands, queries, zerolog.Nop())
+
+    // 4. Start ephemeral test HTTP server
+    srv := httptest.NewServer(handler.Routes())
+    t.Cleanup(srv.Close)
+
+    return &amp;testEnv{srv: srv}
+}
+
+func (e *testEnv) addProduct(t *testing.T, name string, price int64) string {
+    t.Helper()
+
+    resp, err := http.Post(
+        e.srv.URL+"/products",
+        "application/json",
+        bytes.NewBufferString(fmt.Sprintf(`{"name":%q,"price":%d}`, name, price)),
+    )
+    require.NoError(t, err)
+    defer resp.Body.Close()
+    require.Equal(t, http.StatusCreated, resp.StatusCode)
+
+    var body map[string]string
+    require.NoError(t, json.NewDecoder(resp.Body).Decode(&amp;body))
+    require.NotEmpty(t, body["id"])
+    return body["id"]
+}
+
+func (e *testEnv) listProducts(t *testing.T) []application.ProductView {
+    t.Helper()
+
+    resp, err := http.Get(e.srv.URL + "/products")
+    require.NoError(t, err)
+    defer resp.Body.Close()
+    require.Equal(t, http.StatusOK, resp.StatusCode)
+
+    var body struct {
+        Products []application.ProductView `json:"products"`
+    }
+    require.NoError(t, json.NewDecoder(resp.Body).Decode(&amp;body))
+    return body.Products
+}
+
+func TestProductAPI(t *testing.T) {
+    env := setupTestEnv(t)
+
+    t.Run("add product", func(t *testing.T) {
+        id := env.addProduct(t, "Widget", 1299)
+        require.NotEmpty(t, id)
+    })
+
+    t.Run("list products", func(t *testing.T) {
+        id := env.addProduct(t, "Gadget", 999)
+        products := env.listProducts(t)
+
+        var got *application.ProductView
+        for i := range products {
+            if products[i].ID == id {
+                got = &amp;products[i]
+                break
+            }
+        }
+        require.NotNil(t, got, "added product not found in list response")
+        require.Equal(t, "Gadget", got.Name)
+        require.Equal(t, int64(999), got.Price)
+    })
+}
+</code></pre>
+
+        <hr />
+
+        <h2>7. Summary &amp; Key Architectural Takeaways</h2>
+        <ul>
+            <li><strong>Interfaces belong to the layer that depends on them</strong>: The application layer defines outbound ports (<code>ports.ProductRepository</code>) describing what it needs from external systems.</li>
+            <li><strong>Inbound vs Outbound Ports</strong>: Inbound ports are called by outside drivers (HTTP, gRPC, CLI); Outbound ports are implemented by infrastructure adapters (MongoDB, PostgreSQL, in-memory).</li>
+            <li><strong>Clean Layering</strong>: Domain depends on nothing; Application depends only on Domain and Ports; Adapters implement Ports.</li>
+            <li><strong>CQRS Separation</strong>: Command services and Query services keep read and write paths clearly separated.</li>
+            <li><strong>Idiomatic Go Naming</strong>: Avoid <code>ProductRepositoryImpl</code>; prefer package-scoped names like <code>mongo.ProductRepository</code> or <code>inmemory.ProductRepository</code>.</li>
+            <li><strong>Declarative DI with <code>uber/fx</code></strong>: Provides declarative dependency graph building, lifecycle management, and dynamic repository switching.</li>
+            <li><strong>Locking &amp; Transactions</strong>: Understand when to use Pessimistic Locking (<code>SELECT FOR UPDATE</code>), Application-level Optimistic Locking (version filters), and Multi-document Transactions (<code>session.WithTransaction()</code>).</li>
+            <li><strong>Robust Testing</strong>: Use Testcontainers and Testify with <code>t.Cleanup()</code>, <code>t.Helper()</code>, and <code>t.Run()</code> for fast, reliable real-world integration testing.</li>
+        </ul>
+
+        <div class="note">
+            <h3>Explore Language Fundamentals</h3>
+            <p>
+                Want to learn more about Go language mechanics, goroutines, channels, memory models, and workspace dependency resolution?
+            </p>
+            <p>
+                👉 Check out: <a href="go-fundamentals.html"><strong>Go Fundamentals — The Complete Guide to Core Concepts, Concurrency, and Tooling</strong></a>.
+            </p>
+        </div>
+
+    </div>
+</body>
+
+</html>
