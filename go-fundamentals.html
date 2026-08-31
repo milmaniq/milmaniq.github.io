@@ -832,7 +832,7 @@ func getBalanceFromFile() (string, error) {
         <h3><code>range</code></h3>
         <pre><code>for i, v := range slice  { /* ... */ }
 for k, v := range mapVar { /* ... */ }
-for i, r := range "hello" { /* r is a rune */ }
+for i, r := range "hello" { /* i is a byte offset; r is a rune (int32) — one Unicode code point */ }
 </code></pre>
 
         <h3>The blank identifier <code>_</code></h3>
@@ -878,6 +878,14 @@ sli := []int{1, 2, 3}  // type []int
             Internally a slice is backed by an array; when you append past its capacity, Go allocates a new (larger)
             array and copies into it.
         </p>
+        <p>
+            A nil slice is often fine to read from (<code>len</code> is 0, <code>range</code> does nothing).
+            <code>append</code> always returns a slice — always assign the return value. When
+            <code>len == cap</code>, <code>append</code> may allocate a larger backing array and return a
+            slice pointing at it:
+        </p>
+        <pre><code>result := append(result, x)
+</code></pre>
 
         <h3>Structs and methods</h3>
         <pre><code>package main
@@ -926,6 +934,17 @@ fmt.Println(websites["Google"])
 websites["Linkedin"] = "https://linkedin.com"
 delete(websites, "Google")
 </code></pre>
+        <p>
+            The two-value form <code>v, ok := m[key]</code> tells you whether the key existed. This pattern
+            appears constantly in hash-map interview problems:
+        </p>
+        <pre><code>if j, ok := seen[target-n]; ok { /* ... */ }
+</code></pre>
+        <p>
+            A nil / zero-value map is fine to read from (missing keys return the zero value), but writing
+            <code>m["key"] = 1</code> panics at runtime. Use <code>make(map[K]V)</code> first. Nil slices
+            do not panic on read — only nil maps panic on write.
+        </p>
         <div class="tip">
             <p>
                 <strong>Note:</strong> built-in maps are <em>not</em> safe for concurrent use. For shared maps
@@ -963,6 +982,21 @@ for _, r := range s {
     }
 }
 </code></pre>
+        <p>
+            Indexing a string yields a <code>byte</code>, not a rune: <code>s[0]</code> on
+            <code>"hello"</code> is <code>'h'</code> (104). You cannot assign to <code>s[i]</code> —
+            strings are immutable UTF-8 byte sequences. To build a new string, use concatenation,
+            <code>fmt.Sprintf</code>, or <code>strings.Builder</code>.
+        </p>
+        <pre><code>import (
+    "strings"
+    "unicode"
+)
+
+strings.ToLower(s)              // new string, all lower
+unicode.IsLetter(rune(s[i]))    // test a byte as letter
+unicode.IsDigit(rune(s[i]))     // test a byte as digit
+</code></pre>
 
         <h3><code>make</code> vs <code>new</code></h3>
         <ul>
@@ -974,9 +1008,10 @@ s := make([]int, 5)   // []int{0,0,0,0,0}
 </code></pre>
 
         <h4>Slice variations</h4>
-        <pre><code>make([]int, 0, 10) // empty, capacity 10 - good when you'll append a known max
-make([]int, 0)     // empty, no capacity hint
-make([]int, 10)    // ten zero values - good when you'll assign by index
+        <pre><code>s := []int{}             // empty slice literal, len 0, cap 0
+make([]int, 0, 10)       // empty, capacity 10 - good when you'll append a known max
+make([]int, 0)           // empty, no capacity hint
+make([]int, 10)          // ten zero values - good when you'll assign by index
 </code></pre>
 
         <h4>Map variations</h4>
@@ -1392,13 +1427,806 @@ fmt.Println(counter)
             </tbody>
         </table>
 
+        <h3>Error handling — the contract: <code>(value, error)</code></h3>
+        <p>
+            Go has no try/catch. Functions that can fail return their result and an error as the last value:
+        </p>
+        <pre><code>result, err := doSomething()
+if err != nil {
+    return zeroValue, err  // propagate upward
+}
+// use result safely here. Do not use result until you have checked err
+</code></pre>
+
+        <h4>Creating and wrapping errors</h4>
+        <pre><code>import (
+    "errors"
+    "fmt"
+)
+
+errors.New("divide by zero")           // used to create errors
+fmt.Errorf("parse %q: %w", s, err)     // used to wrap and propagate the error — preserves cause chain
+</code></pre>
+        <p>
+            Use <code>%w</code> when callers might need <code>errors.Is</code> or <code>errors.As</code> to
+            inspect the underlying error.
+        </p>
+
+        <h4>Propagation pattern</h4>
+        <p>
+            If <code>average</code> were called from another function, you would not print — you would propagate:
+        </p>
+        <pre><code>func reportAverage(nums []int) error {
+    avg, err := average(nums)
+    if err != nil {
+        return fmt.Errorf("report: %w", err)
+    }
+    fmt.Println("avg =", avg)
+    return nil
+}
+</code></pre>
+        <p>
+            Each layer adds context with <code>fmt.Errorf("...: %w", err)</code>. The original cause stays
+            inspectable.
+        </p>
+
+        <h3>Syntax: <code>&amp;</code> and <code>*</code></h3>
+        <pre><code>func bump(n *int) {
+    *n++           // dereference — mutate the original
+}
+
+x := 1
+bump(&amp;x)         // &amp; = address-of
+// x is now 2
+</code></pre>
+        <p>
+            Go is pass-by-value. Take a pointer when you need to mutate the caller's data or represent
+            optional/absent nodes — like <code>Next *ListNode</code> for linked lists.
+        </p>
+
+        <h3>Interfaces</h3>
+        <p>
+            Go achieves polymorphism using interfaces, but without inheritance, without an
+            <code>implements</code> keyword, and without classes.
+        </p>
+        <p>
+            An interface is a list of methods. It contains method signatures. Any type that has those methods
+            satisfies the interface — implicitly:
+        </p>
+        <pre><code>type Stringer interface {
+    String() string
+}
+
+type Person struct {
+    Name string
+}
+
+// If your type has a String() string method, it is a Stringer. No declaration required.
+func (p Person) String() string {
+    return p.Name
+}
+
+var s Stringer = Person{Name: "Ada"} // works — Person has String()
+</code></pre>
+
+        <h3>Interface variables</h3>
+        <p>
+            An interface variable holds a dynamic type and a dynamic value. Its zero value is
+            <code>nil</code> — both type and value are unset.
+        </p>
+        <pre><code>type Person struct {
+    Name string
+    Age  int
+}
+
+var i interface{} = Person{Name: "Ada", Age: 23}
+
+func main() {
+    fmt.Println(i)               // prints {Ada 23}
+    fmt.Println(i.(Person))      // prints {Ada 23}
+    fmt.Println(i.(Person).Name) // prints Ada
+
+    // type switch
+    switch v := i.(type) {
+    case Person:
+        fmt.Println("person:", v.Name) // prints person: Ada
+    default:
+        fmt.Println("unknown")
+    }
+
+    val, ok := i.(int)   // does not panic
+    fmt.Println(ok)      // prints false
+    fmt.Println(val)     // prints 0
+    fmt.Println(i.(int)) // panics
+}
+</code></pre>
+        <p>Always prefer the comma-ok form, not the type switch.</p>
+
+        <h3>An incorrect struct</h3>
+        <p>This does not compile. Common mistakes interviewers look for:</p>
+        <pre><code>type Van struct {
+    // You cannot assign default values inside a struct type definition.
+    yom string = "200"
+
+    // Methods and functions cannot be declared inside a struct.
+
+    // newCar should return a car.
+    func newCar(yom string) {
+        return car {
+            yom
+        }
+    }
+
+    // printYom() should return a string if you want to return c.yom.
+    func (c Van) printYom() {
+        return c.yom
+    }
+}
+</code></pre>
+
+        <h3>Directional channel types</h3>
+        <pre><code>func sendOnly(out chan&lt;- int) { out &lt;- 1 }
+func receiveOnly(in &lt;-chan int) { &lt;-in }
+</code></pre>
+
+        <h3>main exits too early</h3>
+        <pre><code>for i := 0; i &lt; 3; i++ {
+    go fmt.Println(i)
+}
+// main returns — program may exit before goroutines run
+</code></pre>
+        <p>
+            Channels can block main until work completes. When goroutines share memory instead of channels,
+            use a <code>WaitGroup</code>.
+        </p>
+
+        <h3><code>sync.WaitGroup</code> — wait for a batch</h3>
+        <pre><code>var wg sync.WaitGroup
+
+for i := 0; i &lt; 3; i++ {
+    wg.Add(1)
+    go func(n int) {
+        defer wg.Done()
+        fmt.Println(n)
+    }(i)
+}
+wg.Wait()   // blocks until counter returns to zero
+</code></pre>
+        <ul>
+            <li><code>Add(n)</code> before spawning — increments the counter</li>
+            <li><code>Done()</code> once per goroutine — decrements (use <code>defer</code>)</li>
+            <li><code>Wait()</code> blocks until counter is zero</li>
+        </ul>
+
+        <h3>Data races</h3>
+        <p>
+            A data race is two goroutines accessing the same memory, at least one writing, with no
+            synchronization. The result is nondeterministic — tests may pass, production may corrupt data.
+        </p>
+        <pre><code>var count int
+var wg sync.WaitGroup
+
+for i := 0; i &lt; 1000; i++ {
+    wg.Add(1)
+    go func() {
+        defer wg.Done()
+        count++   // RACE — read-modify-write without lock
+    }()
+}
+wg.Wait()
+// count may be anything &lt; 1000
+</code></pre>
+        <div class="tip">
+            <p>
+                Run <code>go test -race ./...</code> in CI. The race detector instruments memory accesses and
+                reports concurrent unsynchronized reads and writes.
+            </p>
+        </div>
+
+        <table class="table" style="max-width:800px;">
+            <thead>
+                <tr>
+                    <th>Tool</th>
+                    <th>Use when</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Channel</td>
+                    <td>Passing ownership of data, pipelines, signaling done</td>
+                </tr>
+                <tr>
+                    <td>Mutex</td>
+                    <td>Protecting shared struct fields or counters in place</td>
+                </tr>
+                <tr>
+                    <td>WaitGroup</td>
+                    <td>Waiting for N independent goroutines to finish</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>Creating contexts</h3>
+        <pre><code>ctx := context.Background()              // root — main, tests, top-level
+ctx, cancel := context.WithCancel(ctx)   // manual cancel
+defer cancel()
+
+ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+defer cancel()                         // always call cancel to release resources
+</code></pre>
+        <p>
+            <code>WithTimeout</code> and <code>WithCancel</code> both return a child context and a cancel
+            function. Call the cancel function even if the timeout fires (<code>defer cancel()</code>).
+        </p>
+        <p>
+            <code>ctx.Err()</code> returns <code>context.DeadlineExceeded</code> for timeouts and
+            <code>context.Canceled</code> for manual cancel.
+        </p>
+
+        <h3><code>ctx</code> is the first parameter</h3>
+        <p>When defining REST APIs (and any I/O that can be cancelled), <code>ctx</code> is the first parameter:</p>
+        <pre><code>func fetch(ctx context.Context, url string) ([]byte, error) {
+</code></pre>
+        <p>
+            Never store a context in a struct. Pass it explicitly. Interviewers check for this convention.
+        </p>
+
+        <h3>HTTP clients</h3>
+        <p>HTTP clients are used to make HTTP calls to upstream services.</p>
+        <p>Why not use <code>http.Get</code> in production code?</p>
+        <pre><code>resp, err := http.Get(url)  // uses http.DefaultClient
+</code></pre>
+        <p>
+            <code>DefaultClient</code> has no timeout. A hung server ties up your goroutine forever.
+            Production code always uses a configured <code>http.Client</code> and a request-scoped context.
+        </p>
+        <p>
+            Create an HTTP client with a timeout, and attach a context on each request:
+        </p>
+        <pre><code>client := &amp;http.Client{
+    Timeout: 10 * time.Second,  // entire request: dial + TLS + body
+}
+
+ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+defer cancel()
+
+req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+if err != nil {
+    return fmt.Errorf("build request: %w", err)
+}
+
+resp, err := client.Do(req)
+if err != nil {
+    return fmt.Errorf("do request: %w", err)
+}
+
+// http.Client returns an error only for transport failures (DNS, connection refused).
+// A 500 response is not an error from Do — you must check StatusCode.
+if resp.StatusCode != http.StatusOK {
+    body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+    return fmt.Errorf("upstream %s: status %d: %s", url, resp.StatusCode, body)
+}
+defer resp.Body.Close()
+</code></pre>
+        <div class="tip">
+            <p>
+                Reuse one <code>http.Client</code> per process (or per upstream service). Clients manage
+                connection pools; creating a new client per request destroys keep-alive benefits.
+            </p>
+        </div>
+
+        <h3>Why Gin?</h3>
+        <p>
+            Go's <code>net/http</code> can serve any API, but production services need routing, JSON helpers,
+            and middleware chains. Gin wraps <code>net/http</code> with:
+        </p>
+        <ul>
+            <li>Path params — <code>/users/:id</code></li>
+            <li>JSON bind + validate — <code>ShouldBindJSON</code></li>
+            <li>Middleware — logging, recovery, auth</li>
+            <li><code>*gin.Context</code> — request-scoped wrapper around <code>http.Request</code> and
+                <code>ResponseWriter</code></li>
+        </ul>
+        <div class="tip">
+            <p>
+                Set <code>gin.SetMode(gin.ReleaseMode)</code> in production to reduce debug logging overhead.
+            </p>
+        </div>
+        <pre><code>import (
+    "net/http"
+    "github.com/gin-gonic/gin"
+)
+
+type CreateUserReq struct {
+    Name string `json:"name" binding:"required"` // binding:"required" tags turn missing fields into a 400
+}
+
+type UserResp struct {
+    ID   int    `json:"id"`
+    Name string `json:"name"`
+}
+
+type Handler struct {
+    users *UserClient
+}
+
+type UserClient struct {
+    base string
+    http *http.Client
+}
+
+func (c *UserClient) GetUser(ctx context.Context, id int) (*User, error) {
+    url := fmt.Sprintf("%s/users/%d", c.base, id)
+    req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+    if err != nil {
+        return nil, fmt.Errorf("build request: %w", err)
+    }
+
+    resp, err := c.http.Do(req)
+    if err != nil {
+        return nil, fmt.Errorf("get user %d: %w", id, err)
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode != http.StatusOK {
+        body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+        return nil, fmt.Errorf("get user %d: status %d: %s", id, resp.StatusCode, body)
+    }
+
+    var u User
+    if err := json.NewDecoder(resp.Body).Decode(&amp;u); err != nil {
+        return nil, fmt.Errorf("decode user %d: %w", id, err)
+    }
+    return &amp;u, nil
+}
+
+func (h *Handler) GetUser(c *gin.Context) {
+    id, err := strconv.Atoi(c.Param("id"))
+    if err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+        return
+    }
+
+    // Pass the request context downstream so cancellation propagates.
+    // When the caller disconnects, c.Request.Context() cancels — outbound GetUser should stop waiting.
+    u, err := h.users.GetUser(c.Request.Context(), id)
+    if err != nil {
+        c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+        return
+    }
+    c.JSON(http.StatusOK, u)
+}
+
+func main() {
+    gin.SetMode(gin.ReleaseMode)
+    r := gin.New() // gin.New() is a bare router — choose middleware explicitly. gin.Default() includes logger + recovery.
+    r.Use(gin.Logger(), gin.Recovery())
+
+    r.GET("/health", func(c *gin.Context) {
+        c.JSON(http.StatusOK, gin.H{"status": "ok"})
+    })
+
+    r.POST("/users", func(c *gin.Context) {
+        var req CreateUserReq
+        if err := c.ShouldBindJSON(&amp;req); err != nil {
+            c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+            return
+        }
+        c.JSON(http.StatusCreated, UserResp{ID: 1, Name: req.Name})
+    })
+
+    r.GET("/users/:id", h.GetUser)
+
+    r.Run(":8080") // r.Run blocks until killed. Fine for local development.
+}
+</code></pre>
+        <p>
+            In production, wrap Gin in <code>http.Server</code> + <code>Shutdown</code> so in-flight requests
+            finish instead of being cut off mid-response. Kubernetes sends <code>SIGTERM</code> before
+            removing a pod.
+        </p>
+        <pre><code>srv := &amp;http.Server{Addr: ":8080", Handler: r}
+go func() {
+    log.Println("listening on :8080")
+    if err := srv.ListenAndServe(); err != nil &amp;&amp; err != http.ErrServerClosed {
+        log.Fatal(err)
+    }
+}()
+
+quit := make(chan os.Signal, 1)
+signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+&lt;-quit
+
+ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+defer cancel()
+_ = srv.Shutdown(ctx)
+</code></pre>
+
+        <h3>gRPC</h3>
+        <p>gRPC is the transport you use when two backend services need a fast, typed contract.</p>
+
+        <h4>1. Define the contract — <code>.proto</code></h4>
+        <pre><code>// proto/user/v1/user.proto
+syntax = "proto3";
+
+package user.v1;
+option go_package = "grpc-api/gen/user/v1;userv1"; // go_package tells protoc where to write Go files and what package name to use.
+
+service UserService {
+  rpc GetUser(GetUserRequest) returns (GetUserResponse) {}
+}
+
+message GetUserRequest {
+  int32 id = 1;
+}
+
+message GetUserResponse {
+  int32 id = 1;
+  string name = 2; // Field numbers (= 1) are permanent — never reuse a number after deletion.
+}
+</code></pre>
+
+        <h4>2. Install the plugins once</h4>
+        <p>Prerequisite: add <code>$(go env GOPATH)/bin</code> to <code>PATH</code>.</p>
+        <pre><code>go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+</code></pre>
+
+        <h4>3. Generate Go code from your module root</h4>
+        <pre><code>protoc --go_out=. --go_opt=paths=source_relative \
+  --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+  proto/user/v1/user.proto
+</code></pre>
+        <p>
+            Output lands in <code>gen/user/v1/</code>: message structs plus
+            <code>UserServiceServer</code> interface and <code>UserServiceClient</code>.
+        </p>
+
+        <h4>4. Implement the server</h4>
+        <pre><code>type server struct {
+    userv1.UnimplementedUserServiceServer
+}
+
+func (s *server) GetUser(ctx context.Context, req *userv1.GetUserRequest) (*userv1.GetUserResponse, error) {
+    if req.GetId() &lt;= 0 {
+        return nil, status.Error(codes.InvalidArgument, "id must be positive")
+    }
+    return &amp;userv1.GetUserResponse{Id: req.GetId(), Name: "Ada"}, nil
+}
+</code></pre>
+        <p>
+            Always embed <code>UnimplementedUserServiceServer</code> so that if you add RPCs to the proto
+            later, old server binaries still compile until you implement the new method (forward
+            compatibility when proto adds RPCs).
+        </p>
+        <p>Return domain errors with <code>status.Error(codes.X, msg)</code> — not bare <code>fmt.Errorf</code>.</p>
+
+        <h4>5. Start and stop the server</h4>
+        <pre><code>lis, err := net.Listen("tcp", ":50051")
+if err != nil {
+    log.Fatal(err)
+}
+
+grpcServer := grpc.NewServer()
+userv1.RegisterUserServiceServer(grpcServer, &amp;server{})
+
+go func() {
+    log.Println("gRPC listening on :50051")
+    if err := grpcServer.Serve(lis); err != nil {
+        log.Fatal(err)
+    }
+}()
+
+quit := make(chan os.Signal, 1)
+signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+&lt;-quit
+
+grpcServer.GracefulStop()  // drain in-flight RPCs
+</code></pre>
+
+        <h4>6. Call from a client</h4>
+        <pre><code>conn, err := grpc.NewClient("localhost:50051",
+    grpc.WithTransportCredentials(insecure.NewCredentials()))
+if err != nil {
+    log.Fatal(err)
+}
+defer conn.Close()
+
+client := userv1.NewUserServiceClient(conn)
+
+ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+defer cancel()
+
+resp, err := client.GetUser(ctx, &amp;userv1.GetUserRequest{Id: 1})
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println(resp.GetId(), resp.GetName()) // 1 Ada
+</code></pre>
+        <p>
+            <code>insecure.NewCredentials()</code> is for local dev only. Production uses TLS. Reuse the
+            connection — one <code>grpc.ClientConn</code> per upstream service, like reusing
+            <code>http.Client</code>.
+        </p>
+
         <h3>Dependency injection</h3>
         <p>Go's idiomatic DI is plain constructor injection - no framework required:</p>
         <pre><code>type Service struct { repo Repo }
 
 func NewService(r Repo) *Service { return &amp;Service{repo: r} }
 </code></pre>
-        <p>(In Part 2 we'll graduate to <code>uber/fx</code> for larger graphs.)</p>
+
+        <h3>uber/fx dependency injection</h3>
+        <p>uber/fx helps with constructor injection and coordinated startup/shutdown.</p>
+
+        <h4>The problem fx solves</h4>
+        <p>Without DI, <code>main</code> grows into this:</p>
+        <pre><code>client := NewUserClient("https://...")
+handler := &amp;Handler{users: client}
+r := gin.New()
+r.GET("/users/:id", handler.GetUser)
+srv := &amp;http.Server{Addr: ":8080", Handler: r}
+// ... 30 lines of signal handling and graceful shutdown
+</code></pre>
+        <p>Every new dependency means editing <code>main</code>.</p>
+
+        <h4>Core primitives</h4>
+        <table class="table" style="max-width:800px;">
+            <thead>
+                <tr>
+                    <th>Primitive</th>
+                    <th>Role</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>fx.Provide(fn)</code></td>
+                    <td>Register a constructor — fx calls it when something needs its return type</td>
+                </tr>
+                <tr>
+                    <td><code>fx.Invoke(fn)</code></td>
+                    <td>Run a function at startup</td>
+                </tr>
+                <tr>
+                    <td><code>fx.Lifecycle</code></td>
+                    <td>Hook <code>OnStart</code> / <code>OnStop</code> — coordinated startup and shutdown</td>
+                </tr>
+            </tbody>
+        </table>
+        <p>
+            Constructors receive dependencies as parameters. Fx matches types automatically — no manual
+            passing.
+        </p>
+
+        <h4>Provide clients and handlers</h4>
+        <pre><code>func NewUserClient() *UserClient {
+    return NewUserClientBase("https://jsonplaceholder.typicode.com")
+}
+
+type Handler struct {
+    users *UserClient
+}
+
+func NewHandler(users *UserClient) *Handler {
+    return &amp;Handler{users: users}
+}
+
+func (h *Handler) GetUser(c *gin.Context) {
+    id, _ := strconv.Atoi(c.Param("id"))
+    u, err := h.users.GetUser(c.Request.Context(), id)
+    if err != nil {
+        c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+        return
+    }
+    c.JSON(http.StatusOK, u)
+}
+</code></pre>
+        <p>
+            <code>NewHandler</code> requires <code>*UserClient</code>. Fx sees that
+            <code>NewUserClient</code> provides <code>*UserClient</code>, so it wires that result into
+            <code>NewHandler</code>.
+        </p>
+
+        <h4>Provide the Gin engine</h4>
+        <pre><code>func NewGinEngine(h *Handler) *gin.Engine {
+    gin.SetMode(gin.ReleaseMode)
+    r := gin.New()
+    r.Use(gin.Logger(), gin.Recovery())
+    r.GET("/health", func(c *gin.Context) {
+        c.JSON(http.StatusOK, gin.H{"status": "ok"})
+    })
+    r.GET("/users/:id", h.GetUser)
+    return r
+}
+</code></pre>
+        <p>
+            Routing stays in one constructor. Later, if you want to add middleware or route groups, edit this
+            function, not <code>main</code>.
+        </p>
+
+        <h4>Lifecycle — start and stop the server</h4>
+        <pre><code>func NewHTTPServer(lc fx.Lifecycle, r *gin.Engine) *http.Server {
+    srv := &amp;http.Server{Addr: ":8080", Handler: r}
+    lc.Append(fx.Hook{
+        OnStart: func(ctx context.Context) error {
+            ln, err := net.Listen("tcp", srv.Addr)
+            if err != nil {
+                return err
+            }
+            log.Println("listening on", srv.Addr)
+            go srv.Serve(ln)
+            return nil
+        },
+        OnStop: func(ctx context.Context) error {
+            log.Println("shutting down HTTP server")
+            return srv.Shutdown(ctx)
+        },
+    })
+    return srv
+}
+</code></pre>
+        <p>
+            This replaces the manual signal-handling block above. Fx calls <code>OnStop</code> on
+            <code>SIGINT</code>/<code>SIGTERM</code> (the signals Kubernetes sends to pods).
+        </p>
+        <div class="tip">
+            <p>
+                Return errors from <code>OnStart</code>, because fx aborts startup if a hook fails. Use the
+                <code>ctx</code> in hooks for bounded startup work (e.g. ping a dependency before accepting
+                traffic).
+            </p>
+        </div>
+
+        <h4><code>main</code> — the whole graph</h4>
+        <pre><code>func main() {
+    fx.New(
+        fx.Provide(
+            NewUserClient,
+            NewHandler,
+            NewGinEngine,
+            NewHTTPServer,
+        ),
+        fx.Invoke(func(*http.Server) {}),
+    ).Run()
+}
+</code></pre>
+        <p>
+            The empty <code>fx.Invoke(func(*http.Server) {})</code> matters: nothing else references
+            <code>*http.Server</code> directly, so without <code>Invoke</code> fx would skip building it.
+            The server must be built to trigger the <code>OnStart</code> lifecycle hooks.
+        </p>
+
+        <h4>Other fx pieces</h4>
+        <ul>
+            <li><code>fx.Module</code> — group related Provides (e.g. <code>user.Module</code>,
+                <code>auth.Module</code>)</li>
+            <li>Config injection — <code>fx.Provide(NewConfig)</code> from env or files</li>
+            <li>gRPC + Gin together — two lifecycle hooks, one app</li>
+            <li>Testing — <code>fx.New(fx.Provide(mockClient), ...)</code> in tests</li>
+        </ul>
+
+        <h3>Microservice patterns</h3>
+        <p>
+            The Go team's guidance for servers is deliberately light: put binaries under
+            <code>cmd/</code>, keep implementation under <code>internal/</code> so other modules cannot
+            import your private packages.
+        </p>
+        <pre><code>usersvc/
+  go.mod
+  cmd/
+    usersvc/
+      main.go          # thin: fx.New(...).Run()
+  internal/
+    config/
+      config.go        # Load from env
+    user/
+      service.go       # domain logic
+      handler.go       # Gin / gRPC handlers
+    client/
+      upstream.go      # typed HTTP/gRPC clients
+    health/
+      health.go        # /livez, /readyz
+  api/                   # optional: OpenAPI / .proto
+</code></pre>
+        <p>
+            Rule of thumb: <code>main</code> wires; <code>internal/*</code> owns logic; clients stay in
+            their own package so handlers never call <code>http.Get</code> directly.
+        </p>
+
+        <h4>Config from the environment</h4>
+        <p>
+            Config holds values that vary between deployments (ports, base URLs, credentials). Those live
+            in environment variables.
+        </p>
+        <pre><code>type Config struct {
+    Addr            string
+    UpstreamBaseURL string
+    UpstreamTimeout time.Duration
+}
+
+func Load() (Config, error) {
+    addr := envOr("ADDR", ":8080")
+    base := os.Getenv("UPSTREAM_BASE_URL")
+    if base == "" {
+        return Config{}, errors.New("UPSTREAM_BASE_URL is required")
+    }
+    timeout, err := time.ParseDuration(envOr("UPSTREAM_TIMEOUT", "3s"))
+    if err != nil {
+        return Config{}, fmt.Errorf("UPSTREAM_TIMEOUT: %w", err)
+    }
+    return Config{Addr: addr, UpstreamBaseURL: base, UpstreamTimeout: timeout}, nil
+}
+
+func envOr(key, fallback string) string {
+    if v := os.Getenv(key); v != "" {
+        return v
+    }
+    return fallback
+}
+</code></pre>
+        <p>
+            Provide config via fx: <code>fx.Provide(config.Load)</code> (or a wrapper that returns
+            <code>(Config, error)</code>). Handlers and clients take <code>Config</code> (or a subset) as
+            constructor params.
+        </p>
+
+        <h3>testcontainers-go integration tests</h3>
+        <p>
+            Integration tests spin the same dependency you ship against (Postgres, Redis) in Docker for the
+            duration of <code>go test</code>, then tear it down.
+        </p>
+        <p>Prerequisites:</p>
+        <ul>
+            <li><code>go get github.com/testcontainers/testcontainers-go</code> (plus a module package when
+                you use one).</li>
+            <li>Docker running (daemon reachable from your shell).</li>
+        </ul>
+        <p>
+            Testcontainers starts a reaper (“Ryuk”) that removes leftover containers if a test process dies.
+            Still call <code>CleanupContainer</code> so teardown is immediate and deterministic.
+        </p>
+        <p>
+            A reaper is a process whose job is to clean up resources that were left behind. In Testcontainers,
+            Ryuk is the name of a small helper container that acts as a reaper.
+        </p>
+        <pre><code>Test starts
+    ↓
+Testcontainers creates PostgreSQL container
+    ↓
+Application crashes before cleanup code runs
+    ↓
+Ryuk notices the test session is gone
+    ↓
+Ryuk deletes PostgreSQL container and related resources
+</code></pre>
+        <p>Example for a test with Redis:</p>
+        <pre><code>func TestWithRedis(t *testing.T) {
+    ctx := context.Background()
+
+    // Prefer modules for Postgres/etc. when they exist; fall back to generic
+    // testcontainers.Run for anything else.
+    redisC, err := testcontainers.Run(
+        ctx, "redis:7-alpine",
+        testcontainers.WithExposedPorts("6379/tcp"),
+        testcontainers.WithWaitStrategy(
+            wait.ForListeningPort("6379/tcp"),
+            wait.ForLog("Ready to accept connections"),
+        ),
+    )
+    testcontainers.CleanupContainer(t, redisC) // safe if redisC is nil
+    require.NoError(t, err)
+
+    endpoint, err := redisC.Endpoint(ctx, "") // host:mappedPort
+    require.NoError(t, err)
+    client := redis.NewClient(&amp;redis.Options{Addr: endpoint})
+    // … exercise your code against client …
+}
+</code></pre>
+        <ul>
+            <li>Exposed port → Docker maps container 6379 to a random host port (parallel tests don’t collide).</li>
+            <li>Wait strategy → don’t dial until the process is actually ready (port + log is the common pair).</li>
+            <li>Endpoint → address your code uses from outside the container.</li>
+        </ul>
 
         <h3>Designing for performance and scalability</h3>
         <ul>
